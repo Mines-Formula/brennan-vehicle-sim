@@ -83,12 +83,17 @@ kRoll_r_arb = 317.6;   % (MF12 = 550) 200-400 target
 
 %% Parameter Sweep Mode
 runParameterSweep = true;
-sweepParameterNames = {'kRoll_r_arb', 'DFDistF'};
-sweepParameterLabels = {'Rear ARB stiffness, kRoll\_r\_arb [N*m/deg]', 'Front downforce distribution'};
-sweepParameterValueSets = {linspace(0, 600, 13), linspace(0.40, 0.55, 10)}; % one vector per parameter
+sweepParameterNames = {'kRoll_r_arb', 'DFDistF', 'r_corner'};
+sweepParameterLabels = {'Rear ARB stiffness, kRoll\_r\_arb [N*m/deg]', 'Front downforce distribution', 'Corner radius [m]'};
+sweepParameterValueSets = {linspace(0, 600, 13), linspace(0.40, 0.55, 10), [5, 7.5, 10, 12.5, 15, 20, 30, 50]}; % one vector per parameter
 sweepTargetG = 1.5;
 sweepSampleCount = 200;
 slipCapDeg = 9.999;
+
+%% Corner Radius Balance Map
+runCornerRadiusBalanceMap = true;
+cornerRadiusMapValues = [5, 7.5, 10, 12.5, 15, 20, 30, 50]; % m
+cornerRadiusMapSampleCount = 200;
 
 kWheel_f = 307.5; % wheel rate lbf/in %370, 307.5
 kWheel_r = 272.5; % 327, 272.5
@@ -395,6 +400,99 @@ if runParameterSweep
         sweepOutputName = [regexprep(sweepParameterName, '[^A-Za-z0-9_]', '_'), '_sweep.png'];
         saveas(gcf, fullfile(outputDir, sweepOutputName));
     end
+end
+
+%% Corner Radius Balance Map
+if runCornerRadiusBalanceMap
+    radiusMapBaseParams = struct( ...
+        'W_tot', W_tot, ...
+        'weightDistF', weightDistF, ...
+        'weightDistL', weightDistL, ...
+        'm_uf', m_uf, ...
+        'm_ur', m_ur, ...
+        'wheelbase', wheelbase, ...
+        'TF', TF, ...
+        'TR', TR, ...
+        'r_l', r_l, ...
+        'sprung_z', sprung_z, ...
+        'toeF', toeF, ...
+        'toeR', toeR, ...
+        'camberF', camberF, ...
+        'camberR', camberR, ...
+        'castor', castor, ...
+        'KPI', KPI, ...
+        'a_x', a_x, ...
+        'a_y', a_y, ...
+        'r_corner', r_corner, ...
+        'CL', CL, ...
+        'CLCD', CLCD, ...
+        'DFDistF', DFDistF, ...
+        'rc_zf', rc_zf, ...
+        'rc_zr', rc_zr, ...
+        'kRoll_f_arb', kRoll_f_arb, ...
+        'kRoll_r_arb', kRoll_r_arb, ...
+        'kWheel_f', kWheel_f, ...
+        'kWheel_r', kWheel_r);
+
+    for radiusIdx = 1:numel(cornerRadiusMapValues)
+        radiusMapParams = radiusMapBaseParams;
+        radiusMapParams.r_corner = cornerRadiusMapValues(radiusIdx);
+        radiusResult = evaluateVehicleBalance(radiusMapParams, P, L, PM, LMZ, cornerRadiusMapSampleCount);
+
+        if radiusIdx == 1
+            radiusMapG = radiusResult.g;
+            slipGapRadiusMap = nan(numel(cornerRadiusMapValues), numel(radiusMapG));
+        end
+
+        slipGapRadiusMap(radiusIdx, :) = radiusResult.frontSA - radiusResult.rearSA;
+    end
+
+    colorLimit = max(abs(slipGapRadiusMap(:)));
+    figure("Name", "Corner Radius Balance Map", "NumberTitle", "off");
+    imagesc(radiusMapG, cornerRadiusMapValues, slipGapRadiusMap);
+    set(gca, "YDir", "normal");
+    colorbar;
+    if colorLimit > 0
+        clim([-colorLimit, colorLimit]);
+    end
+    hold on;
+    [gGrid, radiusGrid] = meshgrid(radiusMapG, cornerRadiusMapValues);
+    speedMphMap = sqrt(radiusGrid .* gGrid * 9.81) * 2.23694;
+    speedContourLevels = 15:5:65;
+    [speedContour, speedContourHandle] = contour(radiusMapG, cornerRadiusMapValues, speedMphMap, speedContourLevels, "w--");
+    clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
+    quiverColIdx = unique(round(linspace(1, numel(radiusMapG), 9)));
+    quiverRowIdx = 1:numel(cornerRadiusMapValues);
+    quiverGap = slipGapRadiusMap(quiverRowIdx, quiverColIdx);
+    quiverScale = max(abs(quiverGap(:)));
+    if quiverScale > 0
+        [quiverG, quiverRadius] = meshgrid(radiusMapG(quiverColIdx), cornerRadiusMapValues(quiverRowIdx));
+        arrowThreshold = 0.1; % deg; suppress near-neutral balance arrows
+        for arrowIdx = 1:numel(quiverGap)
+            if abs(quiverGap(arrowIdx)) >= arrowThreshold
+                if quiverGap(arrowIdx) > 0
+                    arrowText = "\rightarrow";
+                else
+                    arrowText = "\leftarrow";
+                end
+                arrowSize = 10 + 6 * min(abs(quiverGap(arrowIdx)) / quiverScale, 1);
+                text(quiverG(arrowIdx), quiverRadius(arrowIdx), arrowText, ...
+                    "Color", "k", ...
+                    "FontSize", arrowSize, ...
+                    "FontWeight", "bold", ...
+                    "HorizontalAlignment", "center", ...
+                    "VerticalAlignment", "middle");
+            end
+        end
+        text(radiusMapG(2), cornerRadiusMapValues(end) - 2, "\rightarrow understeer", "Color", "k", "FontWeight", "bold");
+        text(radiusMapG(2), cornerRadiusMapValues(end) - 5, "\leftarrow oversteer", "Color", "k", "FontWeight", "bold");
+    end
+    hold off;
+    xlabel("Lateral acceleration [g]");
+    ylabel("Corner radius [m]");
+    title("Vehicle Balance Across Corner Radius");
+    subtitle("Color and arrows show front - rear slip angle [deg]; right = understeer, left = oversteer. White contours label speed [mph].");
+    saveas(gcf, fullfile(outputDir, 'corner_radius_balance_map.png'));
 end
 %% Steering Forces
 d = 0.579; % scrub radius (in)
