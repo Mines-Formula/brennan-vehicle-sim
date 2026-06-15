@@ -19,47 +19,61 @@ addpath(genpath("Tire Modeling"));
 
 % FIXME: This setup currently matches MF13 values. Confirm/reapply MF14
 % assumptions before using this script for MF14 conclusions.
+
+%% Mass and Weight Distribution
+W_tot = 580; % weight of car and driver
 weightDistF = 0.49; % percent of weight on front axle
 weightDistL = 0.51; % percent of weight on left
-DFDistF = 0.46;  % accounts for moment created by drag force
-W_tot = 580; % weight of car and driver
+
 m_tot = W_tot / 32.2;
 m_uf = 37.5 / 32.2;  % unsprung front mass
 m_ur = 40.5 / 32.2;  % unsprung rear mass
 m_s = W_tot / 32.2 - m_uf - m_ur;   % sprung mass
-TL = 60.5; % track length
+
+%% Vehicle Geometry
+wheelbase = 60.5; % wheelbase
 TF = 48; % front track
 TR = 48;
+r_l = 7.875; % tire loaded radius
+sprung_z = 12.35; % sprung mass CG height
+unsprung_z = r_l; % unspring mass approximatly at tire center
+CG_z = (sprung_z * m_s + unsprung_z * (m_uf + m_ur)) / m_tot; % total CG height
+
+%% Alignment and Steering Geometry
 toeF = 0; % static front toe (deg) (wheel plane to centerline)
 toeR = 0;
 camberF = -1.25; % front static camber (deg)
 camberR = -1.25;
 castor = 4; % (deg) used to calculate dynamic camber
 KPI = 7.6; % (deg) used to calclate dynamic camber
-r_l = 7.875; % tire loaded radius
-sprung_z = 12.35; % sprung mass CG height
-unsprung_z = r_l; % unspring mass approximatly at tire center
-CG_z = (sprung_z * m_s + unsprung_z * (m_uf + m_ur)) / m_tot; % total CG height
 
+%% Maneuver Definition
 a_x = zeros(1, 1000); % to be used once combined tire model is built
 a_y = linspace(1, 1.66, 1000) * 32.2; % array of lateral accelerations to be evaluated
+assert(numel(a_x) == numel(a_y), "a_x and a_y sweeps must be the same length");
+n = numel(a_y);
 r_corner = 10;   % radius of corner in m, measured from vehicle centerline
-delta1 = atan(TL ./ (r_corner / 0.0254 + TF / 2)) * 180 / pi; % outside front tire toe angle
+
+% Derived steering geometry for the maneuver.
+delta1 = atan(wheelbase ./ (r_corner / 0.0254 + TF / 2)) * 180 / pi; % outside front tire toe angle
 delta2 = -delta1 * (1 + 0.002079275 * delta1) + 2 * toeF; % inside front tire toe angle
-delta2Ackerman = -atan(TL ./ (r_corner / 0.0254 - TF / 2)) * 180 / pi; % inside toe angle for 100% ackerman
+delta2Ackerman = -atan(wheelbase ./ (r_corner / 0.0254 - TF / 2)) * 180 / pi; % inside toe angle for 100% ackerman
 toeEff = (delta2 - delta2Ackerman) / 2; % effective toe on front axle, accounting for ackerman
 
+%% Aero
 V = sqrt(r_corner .* a_y / 32.2 * 9.81); % velocity in m/s
 CL = 3.05;
 CLCD = 2;
+DFDistF = 0.46;  % accounts for moment created by drag force
 LF = @(V) 1 / 2 * 1.225 * V.^2 * CL * 1.08 * 0.224809;   % downforce, lbf
 DF = @(V) LF(V) / CLCD;   % drag force
 
+%% Suspension
 rc_zf = 2.329; % roll center height front
 rc_zr = 2.644; % roll center height rear
 
-kRoll_ubar = 0; % front ARB stiffness in N*m/deg
-kRoll_tbar = 317.6;   % (MF12 = 550) 200-400 target
+kRoll_f_arb = 0; % front ARB stiffness in N*m/deg
+kRoll_r_arb = 317.6;   % (MF12 = 550) 200-400 target
 
 kWheel_f = 307.5; % wheel rate lbf/in %370, 307.5
 kWheel_r = 272.5; % 327, 272.5
@@ -67,8 +81,8 @@ kWheel_r = 272.5; % 327, 272.5
 kRoll_f_W = kWheel_f .* TF.^2 * tan(pi / 180) / 2 * 0.113;  % roll gradient from coilovers in N*m/deg
 kRoll_r_W = kWheel_r .* TR.^2 * tan(pi / 180) / 2 * 0.113;
 
-kRoll_f = kRoll_f_W + kRoll_ubar;  % total roll gradients, Nm/deg
-kRoll_r = kRoll_r_W + kRoll_tbar;
+kRoll_f = kRoll_f_W + kRoll_f_arb;  % total roll gradients, Nm/deg
+kRoll_r = kRoll_r_W + kRoll_r_arb;
 
 % camber change from steering
 IA1 = camberF - castor * sind(delta1) + KPI * (1 - cosd(delta1)); % front outside
@@ -92,10 +106,8 @@ W_static_fR = (W_tot * (weightDistF) + LF(V) * (DFDistF)) * (1 - weightDistL);
 W_static_fL = (W_tot * (weightDistF) + LF(V) * (DFDistF)) * (weightDistL);
 
 % calculate unsprung load transfer
-% FIXME: Front unsprung transfer uses rear track, and rear uses front track.
-% This is masked while TF == TR, but will be wrong if MF14 tracks differ.
-deltaW_uf = a_y * m_uf * r_l / TR;
-deltaW_ur = a_y * m_ur * r_l / TF;
+deltaW_uf = a_y * m_uf * r_l / TF;
+deltaW_ur = a_y * m_ur * r_l / TR;
 
 % sprung mass load transfer through suspension links
 deltaW_sff = (a_y * m_s * weightDistF) * (rc_zf ./ TF);
@@ -111,7 +123,7 @@ deltaW_f_jacking = -deltaW_jacking;
 deltaW_r_jacking = deltaW_jacking;
 
 % longitudinal load transfer
-deltaLong = a_x * m_tot * CG_z / TL;
+deltaLong = a_x * m_tot * CG_z / wheelbase;
 
 % Calculate individual wheel loads [fL, fR; rL, rR]
 
@@ -136,7 +148,6 @@ Fy_rear = Fy_tot * (1 - weightDistF);
 %% INITIAL SA ESTIMATE
 P = [250, 1.4, 2.4, -0.25, 3, -0.1, -1.5, 0, 0, -30.5, 1.15, 1, 0, 0, -0.128, 0, 0, 0, 1.43]; % pacejka coeffs
 L = [0.62, 1, 1, 1, 1, 1, 1, 1]; % scaling factors
-n = length(Fy_front);
 frontSA = zeros(1, n);
 rearSA = zeros(1, n);
 
@@ -146,7 +157,6 @@ for i = 1:n
     rearSA(i) = findSlip(wheelLoads{2, 1}(i), rearLoad(i), Fy_rear(i), IA3(i), IA4(i), toeR, P, L) * pi / 180;
 end
 %% ADJUST LATERAL GRIP BASED ON DRIVE/BRAKE (TRACTION CIRCLE EFFECT)
-n = length(a_x);
 Fx_rear = zeros(1, n);
 Fx_front = zeros(1, n);
 parasiticDrag = a_y * m_tot .* sin(rearSA) + 0.5 * a_y * m_tot .* sin(frontSA - rearSA) + 0.02 * W_tot; % second term is usually insignificant
@@ -162,7 +172,7 @@ Fy_front = sqrt((Fy_front).^2 + (Fx_front).^2);     % new adjusted required late
 Fy_rear = sqrt((Fy_rear).^2 + (Fx_rear).^2);
 %% ROLLING RESISTANCE UNDERSTEER MOMENT
 Mu = 0.03 * (leftLoad - rightLoad) .* TF / 2; % understeer moment from drag force (~3% of normal load)
-deltaF_rollingResistance = Mu ./ TL;
+deltaF_rollingResistance = Mu ./ wheelbase;
 %% UPDATE ESTIMATE OF SAs
 for i = 1:n
     frontSA(i) = findSlip(wheelLoads{1, 1}(i), frontLoad(i), Fy_front(i), IA1(i), IA2(i), toeEff, P, L) * pi / 180;
@@ -184,7 +194,7 @@ for i = 1:n
 end
 
 Mu = MZ_fi + MZ_fo + MZ_ro + MZ_ri; % estimate each corner using SA, Fz, and camber angle
-deltaF_selfAllign = Mu ./ TL;
+deltaF_selfAllign = Mu ./ wheelbase;
 %% INDUCED TIRE DRAG (UNDERSTEER MOMENT)
 % this section could be improved to account for moment created due to
 % induced tire drag at each corner (account for static toe/ackerman
@@ -215,7 +225,7 @@ for i = 1:n
     rearSA(i) = findSlip(wheelLoads{2, 1}(i), rearLoad(i), Fy_rear(i), IA3(i), IA4(i), toeR, P, L);
 end
 
-figure;
+figure("Name", "Front vs Rear Slip Angle", "NumberTitle", "off");
 plot(a_y / 32.2, frontSA);
 hold on;
 grid on;
@@ -224,45 +234,57 @@ ylabel("SA (deg)");
 xlabel("Cornering g-force");
 title("Comparison of Front vs Rear Slip Angle");
 legend("Front", "Rear");
+subtitle({"Depicts: axle slip angles required to meet lateral force demand.", ...
+    "Optimize: target a smooth, small front-rear gap; front higher than rear trends understeer, rear higher trends oversteer."});
 hold off;
 
-figure;
+figure("Name", "Required Lateral Grip", "NumberTitle", "off");
 plot(a_y / 32.2, Fy_front);
 hold on;
 grid on;
 plot(a_y / 32.2, Fy_rear);
 ylabel("Required Lateral Grip (lbf)");
 xlabel("Cornering g-force");
+title("Required Front vs Rear Lateral Grip");
 legend("Front", "Rear");
+subtitle({"Depicts: lateral force demand assigned to each axle after balance corrections.", ...
+    "Optimize: shift aero, weight, roll stiffness, camber, or tire capacity toward the axle reaching its grip limit first."});
 hold off;
 
-figure;
+figure("Name", "Front vs Rear Load Transfer", "NumberTitle", "off");
 plot(a_y / 32.2, wheelLoads{1, 1} - wheelLoads{1, 2});
 hold on;
 grid on;
 plot(a_y / 32.2, wheelLoads{2, 1} - wheelLoads{2, 2});
 ylabel("Load Transfer (lbf)");
 xlabel("Cornering g-force");
+title("Front vs Rear Lateral Load Transfer");
 legend("Front", "Rear");
+subtitle({"Depicts: inside-to-outside normal load transfer at each axle.", ...
+    "Optimize: reduce excessive transfer at the limiting axle; lower CG, widen track, or shift roll stiffness away from that axle."});
 hold off;
 
-figure;
+figure("Name", "Inside Wheel Loads", "NumberTitle", "off");
 plot(a_y / 32.2, wheelLoads{1, 2});
 hold on;
 grid on;
 plot(a_y / 32.2, wheelLoads{2, 2});
 ylabel("Inside Load (lbf)");
 xlabel("Cornering g-force");
+title("Inside Front vs Rear Wheel Loads");
 legend("Front", "Rear");
+subtitle({"Depicts: inside tire vertical load as lateral acceleration increases.", ...
+    "Optimize: keep inside loads positive and useful; avoid unloading with excessive roll stiffness, high CG, or narrow track."});
 hold off;
 %% Plot Understeer Gradient
-figure;
+figure("Name", "Understeer Gradient", "NumberTitle", "off");
 theta_steer = frontSA - rearSA + (abs(delta1) + abs(delta2)) / 2;
 plot(a_y / 32.2, theta_steer);
 xlabel("Lateral Acceleration [g]");
 ylabel("Steering Angle [deg]");
-title("Understeer Gradient for 15m Radius Corner");
-% FIXME: Title says 15 m, but r_corner is currently 10 m.
+title(sprintf("Understeer Gradient for %.0f m Radius Corner", r_corner));
+subtitle({"Depicts: steering angle required as lateral acceleration rises.", ...
+    "Optimize: target a smooth, predictable, slightly positive gradient; reduce slope for less understeer and avoid negative slope at the limit."});
 %% Steering Forces
 d = 0.579; % scrub radius (in)
 KPI = 7.6 * pi / 180; % KPI angle (rad)
@@ -350,7 +372,7 @@ T_column2 = F_rack * r_pinion; % steering column torque (lbf-in)
 D_wheel = 8.5; % steering wheel diameter (in)
 F_wheel2 = -T_column2 / D_wheel; % steering wheel force in each hand (lbf)
 
-figure;
+figure("Name", "Steering Wheel Force Comparison", "NumberTitle", "off");
 plot(a_y / 32.2, F_wheel);
 hold on;
 plot(a_y / 32.2, F_wheel1);
@@ -358,11 +380,13 @@ plot(a_y / 32.2, F_wheel2);
 xlim([0.8, 1.9]);
 xlabel("Cornering G-force");
 ylabel("Steering Force (lbf)");
-legend("MF13", "MF12", "MF11");
+legend("MF14", "MF12", "MF11");
 grid on;
 title("Steering Force at 10 deg Steering Angle, 8.5 in Wheel");
+subtitle({"Depicts: driver hand force from vertical load, lateral force, and aligning torque.", ...
+    "Optimize: keep effort high enough for feedback but not fatiguing; tune trail, scrub radius, caster, KPI, and steering ratio."});
 
-figure;
+figure("Name", "Steering Column Torque Comparison", "NumberTitle", "off");
 plot(a_y / 32.2, -T_column);
 hold on;
 plot(a_y / 32.2, -T_column1);
@@ -370,6 +394,8 @@ plot(a_y / 32.2, -T_column2);
 xlim([0.8, 1.9]);
 xlabel("Cornering G-force");
 ylabel("Column Torque (lbf-in)");
-legend("MF13", "MF12", "MF11");
+legend("MF14", "MF12", "MF11");
 grid on;
 title("Steering Column Torque at 10 deg Steering Angle");
+subtitle({"Depicts: steering column torque required for each front geometry case.", ...
+    "Optimize: balance feedback and effort by tuning trail, scrub radius, caster, KPI, and steering ratio."});
