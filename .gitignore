@@ -1,0 +1,36 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local agent/tool metadata
+.agents/
+.codex/
+
+# MATLAB editor backups and crash logs
+*.asv
+*.m~
+*.autosave
+matlab_crash_dump.*
+
+# MATLAB and Simulink generated artifacts
+slprj/
+codegen/
+*.slxc
+*.mex*
+*_ert_rtw/
+*_grt_rtw/
+*_rtw/
+
+# Build and temporary outputs
+*.log
+*.tmp
+*.bak
+*.o
+*.obj
+
