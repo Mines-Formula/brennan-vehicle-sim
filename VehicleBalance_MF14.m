@@ -17,9 +17,11 @@ addpath(genpath("Tire Modeling"))
 %% VEHICLE SETUP
 %all units in lbs, in (unless specified)
 
-weightDistF = 0.46; %percent of weight on front axle
-weightDistL = 0.50; %percent of weight on left
-DFDistF = 0.40;  %accounts for moment created by drag force
+% FIXME: This setup currently matches MF13 values. Confirm/reapply MF14
+% assumptions before using this script for MF14 conclusions.
+weightDistF = 0.49; %percent of weight on front axle
+weightDistL = 0.51; %percent of weight on left
+DFDistF = 0.46;  %accounts for moment created by drag force
 W_tot = 580; %weight of car and driver
 m_tot = W_tot/32.2;
 m_uf = 37.5/32.2;  %unsprung front mass
@@ -40,15 +42,15 @@ unsprung_z = r_l; %unspring mass approximatly at tire center
 CG_z = (sprung_z*m_s+unsprung_z*(m_uf+m_ur))/m_tot; %total CG height
 
 a_x = zeros(1,1000); %to be used once combined tire model is built
-a_y = linspace(1,2.5,1000)*32.2; %array of lateral accelerations to be evaluated
-r_corner = 40;   %radius of corner in m, measured from vehicle centerline
+a_y = linspace(1,1.66,1000)*32.2; %array of lateral accelerations to be evaluated
+r_corner = 10;   %radius of corner in m, measured from vehicle centerline
 delta1 = atan(TL./(r_corner/0.0254+TF/2))*180/pi; %outside front tire toe angle
 delta2 = -delta1*(1+0.002079275*delta1) + 2*toeF; %inside front tire toe angle
 delta2Ackerman = -atan(TL./(r_corner/0.0254-TF/2))*180/pi; %inside toe angle for 100% ackerman
 toeEff = (delta2 - delta2Ackerman)/2; %effective toe on front axle, accounting for ackerman
 
 V = sqrt(r_corner.*a_y/32.2*9.81); %velocity in m/s
-CL = 3.4;
+CL = 3.05;
 CLCD = 2;
 LF = @(V) 1/2*1.225*V.^2*CL*1.08*0.224809;   %downforce, lbf
 DF = @(V) LF(V)/CLCD;   %drag force
@@ -57,7 +59,7 @@ rc_zf = 2.329; %roll center height front
 rc_zr = 2.644; %roll center height rear
 
 kRoll_ubar = 0; %front ARB stiffness in N*m/deg
-kRoll_tbar = 100;   %(MF12 = 550) 200-400 target
+kRoll_tbar = 317.6;   %(MF12 = 550) 200-400 target
 
 kWheel_f = 307.5; %wheel rate lbf/in %370, 307.5
 kWheel_r = 272.5; %327, 272.5
@@ -90,6 +92,8 @@ W_static_fR = (W_tot*(weightDistF)+LF(V)*(DFDistF))*(1-weightDistL);
 W_static_fL = (W_tot*(weightDistF)+LF(V)*(DFDistF))*(weightDistL);
 
 %calculate unsprung load transfer
+% FIXME: Front unsprung transfer uses rear track, and rear uses front track.
+% This is masked while TF == TR, but will be wrong if MF14 tracks differ.
 deltaW_uf = a_y*m_uf*r_l/TR;
 deltaW_ur = a_y*m_ur*r_l/TF;
 
@@ -258,6 +262,7 @@ plot(a_y/32.2, theta_steer)
 xlabel("Lateral Acceleration [g]")
 ylabel("Steering Angle [deg]")
 title("Understeer Gradient for 15m Radius Corner")
+% FIXME: Title says 15 m, but r_corner is currently 10 m.
 %% Steering Forces
 d = 0.579; %scrub radius (in)
 KPI = 7.6*pi/180; %KPI angle (rad)
@@ -369,3 +374,8 @@ ylabel("Column Torque (lbf-in)")
 legend("MF13", "MF12", "MF11")
 grid on
 title("Steering Column Torque at 10 deg Steering Angle")
+
+
+
+
+
