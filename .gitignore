@@ -26,6 +26,7 @@ codegen/
 *_ert_rtw/
 *_grt_rtw/
 *_rtw/
+VehicleBalance_*_outputs/
 
 # Build and temporary outputs
 *.log
