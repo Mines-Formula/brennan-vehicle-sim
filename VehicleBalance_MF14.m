@@ -29,7 +29,7 @@ end
 %% Mass and Weight Distribution
 W_tot = 580; % weight of car and driver
 weightDistF = 0.49; % percent of weight on front axle
-weightDistL = 0.51; % percent of weight on left
+weightDistL = 0.50; % percent of weight on left
 
 m_tot = W_tot / 32.2;
 m_uf = 37.5 / 32.2;  % unsprung front mass
@@ -68,9 +68,12 @@ toeEff = (delta2 - delta2Ackerman) / 2; % effective toe on front axle, accountin
 
 %% Aero
 V = sqrt(r_corner .* a_y / 32.2 * 9.81); % velocity in m/s
-CL = 3.05;
-CLCD = 2;
-DFDistF = 0.46;  % accounts for moment created by drag force
+CL = 3.71;
+CD = 1.71;
+CLCD = CL / CD;
+DFDistFMin = 0.41;
+DFDistFMax = 0.43;
+DFDistF = (DFDistFMax - DFDistFMin) / 2 + DFDistFMin;  % accounts for moment created by drag force
 LF = @(V) 1 / 2 * 1.225 * V.^2 * CL * 1.08 * 0.224809;   % downforce, lbf
 DF = @(V) LF(V) / CLCD;   % drag force
 
