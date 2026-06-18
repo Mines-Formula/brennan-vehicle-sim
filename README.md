@@ -10,6 +10,11 @@ single packaged application. Most workflows are run directly from MATLAB.
 
 - `VehicleBalance_MF12.m`, `VehicleBalance_MF13.m`, `VehicleBalance_MF14.m` -
   steady-state cornering balance models for different vehicle generations.
+- `tools/run_vehicle_balance_sweep.py` - builds GIF animations from generated
+  vehicle-balance sweep case folders.
+- `tools/run_vehicle_balance_sweep.sh` - helper script for generating scalar
+  sweep case folders and GIFs. In this Codex environment MATLAB may need to be
+  launched directly rather than as a child of this helper.
 - `Accel_Simulator.m` - 75 m acceleration event simulation with gear shifting,
   traction limits, aero drag/downforce, rolling resistance, and launch behavior.
 - `Accel_Sim_AeroSweep.m`, `Accel_Simulator_DRS_Comparison.m`,
@@ -42,7 +47,8 @@ These scripts estimate steady-state cornering balance using wheel loads,
 load transfer, aero distribution, camber, toe/Ackermann effects, Pacejka lateral
 tire force, and aligning moment calculations.
 
-`VehicleBalance_MF13.m` adds the tire modeling folder to the MATLAB path:
+`VehicleBalance_MF14.m` is the current active balance tool. It adds the tire
+modeling folder to the MATLAB path:
 
 ```matlab
 addpath(genpath("Tire Modeling"))
@@ -50,6 +56,84 @@ addpath(genpath("Tire Modeling"))
 
 If running other scripts directly, add the relevant folders to the path first if
 MATLAB cannot find helper functions.
+
+From the terminal, run MF14 with:
+
+```bash
+/usr/local/MATLAB/R2026a/bin/matlab -batch "run('VehicleBalance_MF14.m');"
+```
+
+To leave plot windows open, start MATLAB without `-batch`:
+
+```bash
+/usr/local/MATLAB/R2026a/bin/matlab -nodesktop
+```
+
+Then run:
+
+```matlab
+clear; clc; close all; run('VehicleBalance_MF14.m')
+```
+
+Current notable MF14 baseline values include:
+
+- `weightDistF = 0.48`
+- `weightDistL = 0.50`
+- `kRoll_r_arb = 300` N*m/deg
+- `CL = 3.71`
+- `CD = 1.71`
+- `DFDistF = 0.42`
+
+The MF14 script still carries a warning that many setup values are MF13-derived
+placeholders. Confirm MF14-specific mass, CG, aero, suspension, and steering
+values before treating conclusions as final.
+
+#### Vehicle Balance Overrides and Sweep GIFs
+
+`VehicleBalance_MF14.m` can read scalar overrides from JSON. The supported path
+is:
+
+```matlab
+setenv('VEHICLE_BALANCE_OVERRIDE_FILE', '/abs/path/case_overrides.json')
+run('VehicleBalance_MF14.m')
+```
+
+Each override file can set an output folder and any scalar setup variable that
+is read through `getOverrideValue`, for example:
+
+```json
+{
+  "outputDir": "/home/brycewalker/Git/brennan-vehicle-sim/VehicleBalance_MF14_outputs/sweeps/sprung_z/sprung_z_16",
+  "sprung_z": 16
+}
+```
+
+Generated sweep cases are stored under:
+
+```text
+VehicleBalance_MF14_outputs/sweeps/<parameter>/<parameter>_<value>/
+```
+
+GIFs are generated under:
+
+```text
+VehicleBalance_MF14_outputs/sweeps/<parameter>/gifs/
+```
+
+Existing generated sweep sets include:
+
+- `weightDistF`: 0.500 down to 0.460 in 0.005 steps.
+- `kRoll_r_arb`: 0 to 500 N*m/deg in 50 N*m/deg steps.
+- `sprung_z`: 12 to 20 in 1 in steps.
+
+To rebuild GIFs from existing case folders:
+
+```bash
+python3 tools/run_vehicle_balance_sweep.py --parameter sprung_z --values 12 13 14 15 16 17 18 19 20
+```
+
+The GIF builder overlays the current case value on each frame. It uses Pillow,
+which is available in the current environment.
 
 ### Acceleration Simulation
 

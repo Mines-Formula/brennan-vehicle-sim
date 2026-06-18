@@ -4,8 +4,25 @@ close all;
 
 addpath(genpath("Tire Modeling"));
 
+overrideFile = getenv("VEHICLE_BALANCE_OVERRIDE_FILE");
+overrideSpec = getenv("VEHICLE_BALANCE_OVERRIDES");
+if ~isempty(overrideFile) && exist(overrideFile, "file")
+    overrideParams = jsondecode(fileread(overrideFile));
+elseif ~isempty(overrideSpec)
+    overrideParams = jsondecode(overrideSpec);
+else
+    overrideParams = struct();
+end
+
 scriptName = mfilename;
-outputDir = [scriptName, '_outputs'];
+outputDirOverride = getenv("VEHICLE_BALANCE_OUTPUT_DIR");
+if isfield(overrideParams, "outputDir")
+    outputDir = overrideParams.outputDir;
+elseif isempty(outputDirOverride)
+    outputDir = [scriptName, '_outputs'];
+else
+    outputDir = outputDirOverride;
+end
 if ~exist(outputDir, 'dir')
     mkdir(outputDir);
 end
@@ -28,12 +45,18 @@ end
 
 %% Mass and Weight Distribution
 W_tot = 580; % weight of car and driver
-weightDistF = 0.49; % percent of weight on front axle
+weightDistF = 0.48; % percent of weight on front axle
 weightDistL = 0.50; % percent of weight on left
+
+W_tot = getOverrideValue(overrideParams, "W_tot", W_tot);
+weightDistF = getOverrideValue(overrideParams, "weightDistF", weightDistF);
+weightDistL = getOverrideValue(overrideParams, "weightDistL", weightDistL);
 
 m_tot = W_tot / 32.2;
 m_uf = 37.5 / 32.2;  % unsprung front mass
 m_ur = 40.5 / 32.2;  % unsprung rear mass
+m_uf = getOverrideValue(overrideParams, "m_uf", m_uf);
+m_ur = getOverrideValue(overrideParams, "m_ur", m_ur);
 m_s = W_tot / 32.2 - m_uf - m_ur;   % sprung mass
 
 %% Vehicle Geometry
@@ -42,7 +65,13 @@ TF = 48; % front track
 TR = 48;
 r_l = 7.875; % tire loaded radius
 sprung_z = 12.35; % sprung mass CG height
+wheelbase = getOverrideValue(overrideParams, "wheelbase", wheelbase);
+TF = getOverrideValue(overrideParams, "TF", TF);
+TR = getOverrideValue(overrideParams, "TR", TR);
+r_l = getOverrideValue(overrideParams, "r_l", r_l);
+sprung_z = getOverrideValue(overrideParams, "sprung_z", sprung_z);
 unsprung_z = r_l; % unspring mass approximatly at tire center
+unsprung_z = getOverrideValue(overrideParams, "unsprung_z", unsprung_z);
 CG_z = (sprung_z * m_s + unsprung_z * (m_uf + m_ur)) / m_tot; % total CG height
 
 %% Alignment and Steering Geometry
@@ -52,6 +81,12 @@ camberF = -1.25; % front static camber (deg)
 camberR = -1.25;
 castor = 4; % (deg) used to calculate dynamic camber
 KPI = 7.6; % (deg) used to calclate dynamic camber
+toeF = getOverrideValue(overrideParams, "toeF", toeF);
+toeR = getOverrideValue(overrideParams, "toeR", toeR);
+camberF = getOverrideValue(overrideParams, "camberF", camberF);
+camberR = getOverrideValue(overrideParams, "camberR", camberR);
+castor = getOverrideValue(overrideParams, "castor", castor);
+KPI = getOverrideValue(overrideParams, "KPI", KPI);
 
 %% Maneuver Definition
 a_x = zeros(1, 1000); % to be used once combined tire model is built
@@ -59,6 +94,7 @@ a_y = linspace(1, 1.66, 1000) * 32.2; % array of lateral accelerations to be eva
 assert(numel(a_x) == numel(a_y), "a_x and a_y sweeps must be the same length");
 n = numel(a_y);
 r_corner = 10;   % radius of corner in m, measured from vehicle centerline
+r_corner = getOverrideValue(overrideParams, "r_corner", r_corner);
 
 % Derived steering geometry for the maneuver.
 delta1 = atan(wheelbase ./ (r_corner / 0.0254 + TF / 2)) * 180 / pi; % outside front tire toe angle
@@ -70,10 +106,14 @@ toeEff = (delta2 - delta2Ackerman) / 2; % effective toe on front axle, accountin
 V = sqrt(r_corner .* a_y / 32.2 * 9.81); % velocity in m/s
 CL = 3.71;
 CD = 1.71;
+CL = getOverrideValue(overrideParams, "CL", CL);
+CD = getOverrideValue(overrideParams, "CD", CD);
 CLCD = CL / CD;
 DFDistFMin = 0.41;
 DFDistFMax = 0.43;
 DFDistF = (DFDistFMax - DFDistFMin) / 2 + DFDistFMin;  % accounts for moment created by drag force
+CLCD = getOverrideValue(overrideParams, "CLCD", CLCD);
+DFDistF = getOverrideValue(overrideParams, "DFDistF", DFDistF);
 LF = @(V) 1 / 2 * 1.225 * V.^2 * CL * 1.08 * 0.224809;   % downforce, lbf
 DF = @(V) LF(V) / CLCD;   % drag force
 
@@ -82,7 +122,11 @@ rc_zf = 2.329; % roll center height front
 rc_zr = 2.644; % roll center height rear
 
 kRoll_f_arb = 0; % front ARB stiffness in N*m/deg
-kRoll_r_arb = 105;   % (MF12 = 550) 200-400 target
+kRoll_r_arb = 300;   % (MF12 = 550) 200-400 target
+rc_zf = getOverrideValue(overrideParams, "rc_zf", rc_zf);
+rc_zr = getOverrideValue(overrideParams, "rc_zr", rc_zr);
+kRoll_f_arb = getOverrideValue(overrideParams, "kRoll_f_arb", kRoll_f_arb);
+kRoll_r_arb = getOverrideValue(overrideParams, "kRoll_r_arb", kRoll_r_arb);
 
 %% Parameter Sweep Mode
 runParameterSweep = true;
@@ -92,14 +136,22 @@ sweepParameterValueSets = {linspace(0, 600, 13), linspace(0.40, 0.55, 10), [5, 7
 sweepTargetG = 1.5;
 sweepSampleCount = 200;
 slipCapDeg = 9.999;
+runParameterSweep = getOverrideValue(overrideParams, "runParameterSweep", runParameterSweep);
+sweepTargetG = getOverrideValue(overrideParams, "sweepTargetG", sweepTargetG);
+sweepSampleCount = getOverrideValue(overrideParams, "sweepSampleCount", sweepSampleCount);
+slipCapDeg = getOverrideValue(overrideParams, "slipCapDeg", slipCapDeg);
 
 %% Corner Radius Balance Map
 runCornerRadiusBalanceMap = true;
 cornerRadiusMapValues = [5, 7.5, 10, 12.5, 15, 20, 30, 50]; % m
 cornerRadiusMapSampleCount = 200;
+runCornerRadiusBalanceMap = getOverrideValue(overrideParams, "runCornerRadiusBalanceMap", runCornerRadiusBalanceMap);
+cornerRadiusMapSampleCount = getOverrideValue(overrideParams, "cornerRadiusMapSampleCount", cornerRadiusMapSampleCount);
 
 kWheel_f = 307.5; % wheel rate lbf/in %370, 307.5
 kWheel_r = 272.5; % 327, 272.5
+kWheel_f = getOverrideValue(overrideParams, "kWheel_f", kWheel_f);
+kWheel_r = getOverrideValue(overrideParams, "kWheel_r", kWheel_r);
 
 kRoll_f_W = kWheel_f .* TF.^2 * tan(pi / 180) / 2 * 0.113;  % roll gradient from coilovers in N*m/deg
 kRoll_r_W = kWheel_r .* TR.^2 * tan(pi / 180) / 2 * 0.113;
@@ -445,14 +497,26 @@ if runCornerRadiusBalanceMap
         if radiusIdx == 1
             radiusMapG = radiusResult.g;
             slipGapRadiusMap = nan(numel(cornerRadiusMapValues), numel(radiusMapG));
+            saturatedRadiusMap = false(numel(cornerRadiusMapValues), numel(radiusMapG));
         end
 
         slipGapRadiusMap(radiusIdx, :) = radiusResult.frontSA - radiusResult.rearSA;
+        saturatedRadiusMap(radiusIdx, :) = radiusResult.frontSA >= slipCapDeg | radiusResult.rearSA >= slipCapDeg;
     end
 
-    colorLimit = max(abs(slipGapRadiusMap(:)));
+    slipGapDisplayMap = slipGapRadiusMap;
+    slipGapDisplayMap(saturatedRadiusMap) = NaN;
+    finiteUnsaturatedSlipGap = slipGapDisplayMap(isfinite(slipGapDisplayMap));
+    if isempty(finiteUnsaturatedSlipGap)
+        colorLimit = 1;
+    else
+        colorLimit = max(abs(finiteUnsaturatedSlipGap));
+    end
+    arrowThreshold = 0.05; % deg; suppress near-neutral balance arrows
+
     figure("Name", "Corner Radius Balance Map", "NumberTitle", "off");
-    imagesc(radiusMapG, cornerRadiusMapValues, slipGapRadiusMap);
+    balanceImage = imagesc(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap);
+    set(balanceImage, "AlphaData", isfinite(slipGapDisplayMap));
     set(gca, "YDir", "normal");
     colorbar;
     if colorLimit > 0
@@ -464,37 +528,68 @@ if runCornerRadiusBalanceMap
     speedContourLevels = 15:5:65;
     [speedContour, speedContourHandle] = contour(radiusMapG, cornerRadiusMapValues, speedMphMap, speedContourLevels, "w--");
     clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
-    quiverColIdx = unique(round(linspace(1, numel(radiusMapG), 9)));
+
+    if any(saturatedRadiusMap(:))
+        scatter(gGrid(saturatedRadiusMap), radiusGrid(saturatedRadiusMap), 90, ...
+                "s", ...
+                "filled", ...
+                "MarkerFaceColor", [0.1, 0.1, 0.1], ...
+                "MarkerEdgeColor", "none", ...
+                "MarkerFaceAlpha", 0.35);
+    end
+
+    contour(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap, ...
+            [-arrowThreshold, arrowThreshold], ...
+            "k:", ...
+            "LineWidth", 1.2);
+
+    quiverColIdx = unique(round(linspace(1, numel(radiusMapG), 17)));
     quiverRowIdx = 1:numel(cornerRadiusMapValues);
-    quiverGap = slipGapRadiusMap(quiverRowIdx, quiverColIdx);
-    quiverScale = max(abs(quiverGap(:)));
+    quiverGap = slipGapDisplayMap(quiverRowIdx, quiverColIdx);
+    finiteQuiverGap = quiverGap(isfinite(quiverGap));
+    if isempty(finiteQuiverGap)
+        quiverScale = 0;
+    else
+        quiverScale = max(abs(finiteQuiverGap));
+    end
     if quiverScale > 0
         [quiverG, quiverRadius] = meshgrid(radiusMapG(quiverColIdx), cornerRadiusMapValues(quiverRowIdx));
-        arrowThreshold = 0.1; % deg; suppress near-neutral balance arrows
-        for arrowIdx = 1:numel(quiverGap)
-            if abs(quiverGap(arrowIdx)) >= arrowThreshold
-                if quiverGap(arrowIdx) > 0
-                    arrowText = "\rightarrow";
-                else
-                    arrowText = "\leftarrow";
-                end
-                arrowSize = 10 + 6 * min(abs(quiverGap(arrowIdx)) / quiverScale, 1);
-                text(quiverG(arrowIdx), quiverRadius(arrowIdx), arrowText, ...
-                     "Color", "k", ...
-                     "FontSize", arrowSize, ...
-                     "FontWeight", "bold", ...
-                     "HorizontalAlignment", "center", ...
-                     "VerticalAlignment", "middle");
+        quiverMask = isfinite(quiverGap) & abs(quiverGap) >= arrowThreshold;
+        quiverGMasked = quiverG(quiverMask);
+        quiverRadiusMasked = quiverRadius(quiverMask);
+        quiverGapMasked = quiverGap(quiverMask);
+        for arrowIdx = 1:numel(quiverGapMasked)
+            if quiverGapMasked(arrowIdx) > 0
+                arrowText = "\rightarrow";
+            else
+                arrowText = "\leftarrow";
             end
+            arrowSize = 13 + 6 * min(abs(quiverGapMasked(arrowIdx)) / quiverScale, 1);
+            text(quiverGMasked(arrowIdx) + 0.0015, quiverRadiusMasked(arrowIdx) - 0.12, arrowText, ...
+                 "Color", "k", ...
+                 "FontSize", arrowSize, ...
+                 "FontWeight", "bold", ...
+                 "HorizontalAlignment", "center", ...
+                 "VerticalAlignment", "middle");
+            text(quiverGMasked(arrowIdx), quiverRadiusMasked(arrowIdx), arrowText, ...
+                 "Color", "w", ...
+                 "FontSize", arrowSize, ...
+                 "FontWeight", "bold", ...
+                 "HorizontalAlignment", "center", ...
+                 "VerticalAlignment", "middle");
         end
         text(radiusMapG(2), cornerRadiusMapValues(end) - 2, "\rightarrow understeer", "Color", "k", "FontWeight", "bold");
         text(radiusMapG(2), cornerRadiusMapValues(end) - 5, "\leftarrow oversteer", "Color", "k", "FontWeight", "bold");
+        text(radiusMapG(2), cornerRadiusMapValues(end) - 8, "dotted = near neutral", "Color", "k", "FontWeight", "bold");
+        if any(saturatedRadiusMap(:))
+            text(radiusMapG(2), cornerRadiusMapValues(end) - 11, "gray = slip cap", "Color", "k", "FontWeight", "bold");
+        end
     end
     hold off;
     xlabel("Lateral acceleration [g]");
     ylabel("Corner radius [m]");
     title("Vehicle Balance Across Corner Radius");
-    subtitle("Color and arrows show front - rear slip angle [deg]; right = understeer, left = oversteer. White contours label speed [mph].");
+    subtitle("Color shows front - rear slip angle [deg]; arrows show balance direction; white contours label speed [mph].");
     saveas(gcf, fullfile(outputDir, 'corner_radius_balance_map.png'));
 end
 %% Steering Forces
@@ -733,4 +828,13 @@ function result = evaluateVehicleBalance(params, P, L, PM, LMZ, sampleCount)
     result.g = a_y / 32.2;
     result.frontSA = frontSA;
     result.rearSA = rearSA;
+end
+
+function value = getOverrideValue(overrides, fieldName, defaultValue)
+    fieldName = char(fieldName);
+    if isfield(overrides, fieldName)
+        value = overrides.(fieldName);
+    else
+        value = defaultValue;
+    end
 end
