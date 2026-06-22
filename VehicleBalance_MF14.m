@@ -8,11 +8,16 @@ overrideFile = getenv("VEHICLE_BALANCE_OVERRIDE_FILE");
 overrideSpec = getenv("VEHICLE_BALANCE_OVERRIDES");
 if ~isempty(overrideFile) && exist(overrideFile, "file")
     overrideParams = jsondecode(fileread(overrideFile));
+    overrideSource = "file: " + string(overrideFile);
 elseif ~isempty(overrideSpec)
     overrideParams = jsondecode(overrideSpec);
+    overrideSource = "VEHICLE_BALANCE_OVERRIDES";
 else
     overrideParams = struct();
+    overrideSource = "";
 end
+
+printOverrideReport(overrideParams, overrideSource);
 
 scriptName = mfilename;
 outputDirOverride = getenv("VEHICLE_BALANCE_OUTPUT_DIR");
@@ -53,8 +58,8 @@ weightDistF = getOverrideValue(overrideParams, "weightDistF", weightDistF);
 weightDistL = getOverrideValue(overrideParams, "weightDistL", weightDistL);
 
 m_tot = W_tot / 32.2;
-m_uf = 37.5 / 32.2;  % unsprung front mass
-m_ur = 40.5 / 32.2;  % unsprung rear mass
+m_uf = 38.8 / 32.2;  % unsprung front mass
+m_ur = 38.2 / 32.2;  % unsprung rear mass
 m_uf = getOverrideValue(overrideParams, "m_uf", m_uf);
 m_ur = getOverrideValue(overrideParams, "m_ur", m_ur);
 m_s = W_tot / 32.2 - m_uf - m_ur;   % sprung mass
@@ -79,8 +84,8 @@ toeF = 0; % static front toe (deg) (wheel plane to centerline)
 toeR = 0;
 camberF = -1.25; % front static camber (deg)
 camberR = -1.25;
-castor = 4; % (deg) used to calculate dynamic camber
-KPI = 7.6; % (deg) used to calclate dynamic camber
+castor = 3.99; % (deg) used to calculate dynamic camber
+KPI = 7.61; % (deg) used to calclate dynamic camber
 toeF = getOverrideValue(overrideParams, "toeF", toeF);
 toeR = getOverrideValue(overrideParams, "toeR", toeR);
 camberF = getOverrideValue(overrideParams, "camberF", camberF);
@@ -90,10 +95,10 @@ KPI = getOverrideValue(overrideParams, "KPI", KPI);
 
 %% Maneuver Definition
 a_x = zeros(1, 1000); % to be used once combined tire model is built
-a_y = linspace(1, 1.66, 1000) * 32.2; % array of lateral accelerations to be evaluated
+a_y = linspace(1, 2.25, 1000) * 32.2; % array of lateral accelerations to be evaluated
 assert(numel(a_x) == numel(a_y), "a_x and a_y sweeps must be the same length");
 n = numel(a_y);
-r_corner = 10;   % radius of corner in m, measured from vehicle centerline
+r_corner = 30;   % radius of corner in m, measured from vehicle centerline
 r_corner = getOverrideValue(overrideParams, "r_corner", r_corner);
 
 % Derived steering geometry for the maneuver.
@@ -111,7 +116,8 @@ CD = getOverrideValue(overrideParams, "CD", CD);
 CLCD = CL / CD;
 DFDistFMin = 0.41;
 DFDistFMax = 0.43;
-DFDistF = (DFDistFMax - DFDistFMin) / 2 + DFDistFMin;  % accounts for moment created by drag force
+% DFDistF = (DFDistFMax - DFDistFMin) / 2 + DFDistFMin;  % accounts for moment created by drag force
+DFDistF = 0.37;
 CLCD = getOverrideValue(overrideParams, "CLCD", CLCD);
 DFDistF = getOverrideValue(overrideParams, "DFDistF", DFDistF);
 LF = @(V) 1 / 2 * 1.225 * V.^2 * CL * 1.08 * 0.224809;   % downforce, lbf
@@ -122,7 +128,7 @@ rc_zf = 2.329; % roll center height front
 rc_zr = 2.644; % roll center height rear
 
 kRoll_f_arb = 0; % front ARB stiffness in N*m/deg
-kRoll_r_arb = 300;   % (MF12 = 550) 200-400 target
+kRoll_r_arb = 600;   % (MF12 = 550) 200-400 target
 rc_zf = getOverrideValue(overrideParams, "rc_zf", rc_zf);
 rc_zr = getOverrideValue(overrideParams, "rc_zr", rc_zr);
 kRoll_f_arb = getOverrideValue(overrideParams, "kRoll_f_arb", kRoll_f_arb);
@@ -143,13 +149,13 @@ slipCapDeg = getOverrideValue(overrideParams, "slipCapDeg", slipCapDeg);
 
 %% Corner Radius Balance Map
 runCornerRadiusBalanceMap = true;
-cornerRadiusMapValues = [5, 7.5, 10, 12.5, 15, 20, 30, 50]; % m
+cornerRadiusMapValues = [5, 7.5, 10, 12.5, 15, 20, 30, 50, 60, 70]; % m
 cornerRadiusMapSampleCount = 200;
 runCornerRadiusBalanceMap = getOverrideValue(overrideParams, "runCornerRadiusBalanceMap", runCornerRadiusBalanceMap);
 cornerRadiusMapSampleCount = getOverrideValue(overrideParams, "cornerRadiusMapSampleCount", cornerRadiusMapSampleCount);
 
-kWheel_f = 307.5; % wheel rate lbf/in %370, 307.5
-kWheel_r = 272.5; % 327, 272.5
+kWheel_f = 295; % wheel rate lbf/in %370, 307.5
+kWheel_r = 273; % 327, 272.5
 kWheel_f = getOverrideValue(overrideParams, "kWheel_f", kWheel_f);
 kWheel_r = getOverrideValue(overrideParams, "kWheel_r", kWheel_r);
 
@@ -525,7 +531,7 @@ if runCornerRadiusBalanceMap
     hold on;
     [gGrid, radiusGrid] = meshgrid(radiusMapG, cornerRadiusMapValues);
     speedMphMap = sqrt(radiusGrid .* gGrid * 9.81) * 2.23694;
-    speedContourLevels = 15:5:65;
+    speedContourLevels = 15:5:75;
     [speedContour, speedContourHandle] = contour(radiusMapG, cornerRadiusMapValues, speedMphMap, speedContourLevels, "w--");
     clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
 
@@ -836,5 +842,34 @@ function value = getOverrideValue(overrides, fieldName, defaultValue)
         value = overrides.(fieldName);
     else
         value = defaultValue;
+    end
+end
+
+function printOverrideReport(overrides, overrideSource)
+    overrideNames = fieldnames(overrides);
+    if isempty(overrideNames)
+        fprintf("VehicleBalance_MF14: no overrides active.\n");
+        return
+    end
+
+    fprintf("VehicleBalance_MF14: using overrides from %s\n", overrideSource);
+    for overrideIdx = 1:numel(overrideNames)
+        overrideName = overrideNames{overrideIdx};
+        overrideValue = overrides.(overrideName);
+        fprintf("  %s = %s\n", overrideName, formatOverrideValue(overrideValue));
+    end
+end
+
+function textValue = formatOverrideValue(value)
+    if isstring(value) || ischar(value)
+        textValue = """" + string(value) + """";
+    elseif islogical(value) && isscalar(value)
+        textValue = string(mat2str(value));
+    elseif isnumeric(value) && isscalar(value)
+        textValue = string(num2str(value, "%.10g"));
+    elseif isnumeric(value)
+        textValue = string(mat2str(value));
+    else
+        textValue = "<" + string(class(value)) + ">";
     end
 end
