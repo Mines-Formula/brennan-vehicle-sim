@@ -127,7 +127,7 @@ rc_zf = 2.329; % roll center height front
 rc_zr = 2.644; % roll center height rear
 
 kRoll_f_arb = 0; % front ARB stiffness in N*m/deg
-kRoll_r_arb = 300;   % (MF12 = 550) 200-400 target
+kRoll_r_arb = 0;   % (MF12 = 550) 200-400 target
 rc_zf = getOverrideValue(overrideParams, "rc_zf", rc_zf);
 rc_zr = getOverrideValue(overrideParams, "rc_zr", rc_zr);
 kRoll_f_arb = getOverrideValue(overrideParams, "kRoll_f_arb", kRoll_f_arb);

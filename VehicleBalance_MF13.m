@@ -57,7 +57,7 @@ rc_zf = 2.329; % roll center height front
 rc_zr = 2.644; % roll center height rear
 
 kRoll_ubar = 0; % front ARB stiffness in N*m/deg
-kRoll_tbar = 317.6;   % (MF12 = 550) 200-400 target
+kRoll_tbar = 200;   % (MF12 = 550) 200-400 target
 
 kWheel_f = 307.5; % wheel rate lbf/in %370, 307.5
 kWheel_r = 272.5; % 327, 272.5
