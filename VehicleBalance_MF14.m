@@ -183,6 +183,21 @@ aeroOptimizationFineHalfRange = getOverrideValue(overrideParams, "aeroOptimizati
 aeroOptimizationFineStep = getOverrideValue(overrideParams, "aeroOptimizationFineStep", aeroOptimizationFineStep);
 aeroOptimizationTargetSlipGap = getOverrideValue(overrideParams, "aeroOptimizationTargetSlipGap", aeroOptimizationTargetSlipGap);
 
+%% Front-Rear Weight Distribution Optimization
+runWeightDistributionOptimization = true;
+weightDistributionCoarseValues = 0.40:0.025:0.60;
+weightDistributionFineHalfRange = 0.025;
+weightDistributionFineStep = 0.005;
+runWeightDistributionOptimization = getOverrideValue(overrideParams, "runWeightDistributionOptimization", runWeightDistributionOptimization);
+weightDistributionCoarseValues = getOverrideValue(overrideParams, "weightDistributionCoarseValues", weightDistributionCoarseValues);
+weightDistributionFineHalfRange = getOverrideValue(overrideParams, "weightDistributionFineHalfRange", weightDistributionFineHalfRange);
+weightDistributionFineStep = getOverrideValue(overrideParams, "weightDistributionFineStep", weightDistributionFineStep);
+
+%% Aero Balance Map Comparison
+runAeroBalanceMapComparison = true;
+aeroBalanceComparisonValues = [0.41, 0.43, 0.45];
+runAeroBalanceMapComparison = getOverrideValue(overrideParams, "runAeroBalanceMapComparison", runAeroBalanceMapComparison);
+
 kWheel_f = 295; % wheel rate lbf/in %370, 307.5
 kWheel_r = 273; % 327, 272.5
 kWheel_f = getOverrideValue(overrideParams, "kWheel_f", kWheel_f);
@@ -530,8 +545,8 @@ if runCornerRadiusBalanceMap
         aeroOptimizationBaseParams = radiusMapBaseParams;
         aeroOptimizationBaseParams.a_y = aeroOptimizationGValues * 32.2;
         aeroOptimizationBaseParams.a_x = zeros(size(aeroOptimizationGValues));
-        coarseAeroMetrics = evaluateAeroBalanceCandidates( ...
-            aeroOptimizationCoarseValues, aeroOptimizationRadii, aeroOptimizationBaseParams, ...
+        coarseAeroMetrics = evaluateBalanceParameterCandidates( ...
+            aeroOptimizationCoarseValues, "DFDistF", aeroOptimizationRadii, aeroOptimizationBaseParams, ...
             P, L, PM, LMZ, numel(aeroOptimizationGValues), slipCapDeg, ...
             aeroOptimizationTargetSlipGap, aeroOptimizationSaturationPenalty, ...
             aeroOptimizationWheelLiftPenalty);
@@ -540,8 +555,8 @@ if runCornerRadiusBalanceMap
         fineAeroValues = unique(max(0, coarseBestValue - aeroOptimizationFineHalfRange): ...
                                 aeroOptimizationFineStep: ...
                                 min(1, coarseBestValue + aeroOptimizationFineHalfRange));
-        fineAeroMetrics = evaluateAeroBalanceCandidates( ...
-            fineAeroValues, aeroOptimizationRadii, aeroOptimizationBaseParams, ...
+        fineAeroMetrics = evaluateBalanceParameterCandidates( ...
+            fineAeroValues, "DFDistF", aeroOptimizationRadii, aeroOptimizationBaseParams, ...
             P, L, PM, LMZ, numel(aeroOptimizationGValues), slipCapDeg, ...
             aeroOptimizationTargetSlipGap, aeroOptimizationSaturationPenalty, ...
             aeroOptimizationWheelLiftPenalty);
@@ -584,113 +599,155 @@ if runCornerRadiusBalanceMap
         saveas(gcf, fullfile(outputDir, 'aero_balance_optimization.png'));
     end
 
+    if runWeightDistributionOptimization
+        weightOptimizationBaseParams = radiusMapBaseParams;
+        weightOptimizationBaseParams.a_y = aeroOptimizationGValues * 32.2;
+        weightOptimizationBaseParams.a_x = zeros(size(aeroOptimizationGValues));
+        coarseWeightMetrics = evaluateBalanceParameterCandidates( ...
+            weightDistributionCoarseValues, "weightDistF", aeroOptimizationRadii, weightOptimizationBaseParams, ...
+            P, L, PM, LMZ, numel(aeroOptimizationGValues), slipCapDeg, ...
+            aeroOptimizationTargetSlipGap, aeroOptimizationSaturationPenalty, ...
+            aeroOptimizationWheelLiftPenalty);
+        [~, coarseWeightBestIdx] = min(coarseWeightMetrics.objective);
+        coarseWeightBestValue = weightDistributionCoarseValues(coarseWeightBestIdx);
+        fineWeightValues = unique(max(0, coarseWeightBestValue - weightDistributionFineHalfRange): ...
+                                  weightDistributionFineStep: ...
+                                  min(1, coarseWeightBestValue + weightDistributionFineHalfRange));
+        fineWeightMetrics = evaluateBalanceParameterCandidates( ...
+            fineWeightValues, "weightDistF", aeroOptimizationRadii, weightOptimizationBaseParams, ...
+            P, L, PM, LMZ, numel(aeroOptimizationGValues), slipCapDeg, ...
+            aeroOptimizationTargetSlipGap, aeroOptimizationSaturationPenalty, ...
+            aeroOptimizationWheelLiftPenalty);
+        [bestWeightObjective, bestWeightIdx] = min(fineWeightMetrics.objective);
+        optimalWeightDistF = fineWeightValues(bestWeightIdx);
+
+        fprintf("Weight distribution optimization: %.1f%% front / %.1f%% rear (objective %.3f deg-equivalent)\n", ...
+                100 * optimalWeightDistF, 100 * (1 - optimalWeightDistF), bestWeightObjective);
+        fprintf("  RMS slip-gap error = %.3f deg, saturation = %.1f%%, wheel lift = %.1f%%\n", ...
+                fineWeightMetrics.rmsSlipGapError(bestWeightIdx), ...
+                100 * fineWeightMetrics.saturationFraction(bestWeightIdx), ...
+                100 * fineWeightMetrics.wheelLiftFraction(bestWeightIdx));
+
+        figure("Name", "Front-Rear Weight Distribution Optimization", "NumberTitle", "off");
+        subplot(2, 1, 1);
+        plot(100 * weightDistributionCoarseValues, coarseWeightMetrics.objective, "o-", "DisplayName", "Coarse search");
+        hold on;
+        plot(100 * fineWeightValues, fineWeightMetrics.objective, ".-", "LineWidth", 1.5, ...
+             "MarkerSize", 14, "DisplayName", "Fine search");
+        xline(100 * optimalWeightDistF, "--", sprintf("Optimum %.1f%% front", 100 * optimalWeightDistF));
+        xline(100 * weightDistF, ":", sprintf("Baseline %.1f%% front", 100 * weightDistF));
+        grid on;
+        ylabel("Penalized objective [deg-equivalent]");
+        title("MF14 Front-Rear Weight Distribution Optimization");
+        legend("Location", "best");
+        hold off;
+
+        subplot(2, 1, 2);
+        plot(100 * fineWeightValues, fineWeightMetrics.rmsSlipGapError, "o-", "DisplayName", "RMS balance error [deg]");
+        hold on;
+        plot(100 * fineWeightValues, 100 * fineWeightMetrics.saturationFraction, "o-", "DisplayName", "Saturated points [%]");
+        plot(100 * fineWeightValues, 100 * fineWeightMetrics.wheelLiftFraction, "o-", "DisplayName", "Wheel-lift points [%]");
+        xline(100 * optimalWeightDistF, "--");
+        grid on;
+        xlabel("Front weight distribution [%]");
+        ylabel("Metric value");
+        legend("Location", "best");
+        subtitle(sprintf("Target gap = %.2f deg across radii %s m and g points %s", ...
+                         aeroOptimizationTargetSlipGap, mat2str(aeroOptimizationRadii), ...
+                         mat2str(aeroOptimizationGValues)));
+        hold off;
+        saveas(gcf, fullfile(outputDir, 'weight_distribution_optimization.png'));
+    end
+
+    if runAeroBalanceMapComparison
+        aeroComparisonMaps = cell(size(aeroBalanceComparisonValues));
+        combinedAeroComparisonGap = [];
+        for aeroComparisonIdx = 1:numel(aeroBalanceComparisonValues)
+            aeroComparisonParams = radiusMapBaseParams;
+            aeroComparisonParams.DFDistF = aeroBalanceComparisonValues(aeroComparisonIdx);
+            aeroComparisonMaps{aeroComparisonIdx} = calculateCornerRadiusMap( ...
+                aeroComparisonParams, cornerRadiusMapValues, P, L, PM, LMZ, ...
+                cornerRadiusMapSampleCount, slipCapDeg);
+            currentFiniteGap = aeroComparisonMaps{aeroComparisonIdx}.displayGap( ...
+                isfinite(aeroComparisonMaps{aeroComparisonIdx}.displayGap));
+            combinedAeroComparisonGap = [combinedAeroComparisonGap; currentFiniteGap]; %#ok<AGROW>
+        end
+        if isempty(combinedAeroComparisonGap)
+            aeroComparisonColorLimit = 1;
+        else
+            aeroComparisonColorLimit = max(abs(combinedAeroComparisonGap));
+        end
+
+        aeroComparisonFigure = figure("Name", "MF14 Aero Balance Comparison", ...
+                                      "NumberTitle", "off", "Position", [50, 100, 2200, 750]);
+        aeroComparisonLayout = tiledlayout(aeroComparisonFigure, 1, 3, ...
+                                           "TileSpacing", "compact", "Padding", "compact");
+        for aeroComparisonIdx = 1:numel(aeroBalanceComparisonValues)
+            aeroComparisonAxes = nexttile(aeroComparisonLayout);
+            plotCornerRadiusBalancePanel(aeroComparisonAxes, aeroComparisonMaps{aeroComparisonIdx}, ...
+                cornerRadiusMapValues, aeroComparisonColorLimit, ...
+                sprintf("%.0f%% front aero balance", 100 * aeroBalanceComparisonValues(aeroComparisonIdx)));
+            if aeroComparisonIdx == numel(aeroBalanceComparisonValues)
+                aeroComparisonColorbar = colorbar(aeroComparisonAxes);
+                aeroComparisonColorbar.Label.String = "Front - rear slip angle [deg]";
+            end
+        end
+        aeroComparisonLayout.Title.String = sprintf( ...
+            "MF14 Aero Balance Comparison: Rear ARB = %.0f N*m/deg", kRoll_r_arb);
+        aeroComparisonLayout.Subtitle.String = ...
+            "Shared scale and operating grid; right arrows indicate understeer, left arrows indicate oversteer, gray marks slip cap.";
+        saveas(aeroComparisonFigure, fullfile(outputDir, 'aero_balance_comparison_41_43_45.png'));
+    end
+
+    % MF13 comparison parameters. Both vehicles use the MF14 g/radius grid
+    % and the same rear-ARB value so each panel is directly comparable.
+    mf13RadiusMapBaseParams = radiusMapBaseParams;
+    mf13RadiusMapBaseParams.weightDistF = 0.49;
+    mf13RadiusMapBaseParams.weightDistL = 0.51;
+    mf13RadiusMapBaseParams.m_uf = 37.5 / 32.2;
+    mf13RadiusMapBaseParams.m_ur = 40.5 / 32.2;
+    mf13RadiusMapBaseParams.castor = 4;
+    mf13RadiusMapBaseParams.KPI = 7.6;
+    mf13RadiusMapBaseParams.CL = 3.05;
+    mf13RadiusMapBaseParams.CLCD = 2;
+    mf13RadiusMapBaseParams.DFDistF = 0.46;
+    mf13RadiusMapBaseParams.kWheel_f = 307.5;
+    mf13RadiusMapBaseParams.kWheel_r = 272.5;
+
     for arbMapIdx = 1:numel(cornerRadiusMapRearArbValues)
         currentRearArb = cornerRadiusMapRearArbValues(arbMapIdx);
         radiusMapBaseParams.kRoll_r_arb = currentRearArb;
+        mf13RadiusMapBaseParams.kRoll_r_arb = currentRearArb;
 
-        for radiusIdx = 1:numel(cornerRadiusMapValues)
-            radiusMapParams = radiusMapBaseParams;
-            radiusMapParams.r_corner = cornerRadiusMapValues(radiusIdx);
-            radiusResult = evaluateVehicleBalance(radiusMapParams, P, L, PM, LMZ, cornerRadiusMapSampleCount);
+        mf14Map = calculateCornerRadiusMap(radiusMapBaseParams, cornerRadiusMapValues, ...
+            P, L, PM, LMZ, cornerRadiusMapSampleCount, slipCapDeg);
+        mf13Map = calculateCornerRadiusMap(mf13RadiusMapBaseParams, cornerRadiusMapValues, ...
+            P, L, PM, LMZ, cornerRadiusMapSampleCount, slipCapDeg);
 
-            if radiusIdx == 1
-                radiusMapG = radiusResult.g;
-                slipGapRadiusMap = nan(numel(cornerRadiusMapValues), numel(radiusMapG));
-                saturatedRadiusMap = false(numel(cornerRadiusMapValues), numel(radiusMapG));
-            end
-
-            slipGapRadiusMap(radiusIdx, :) = radiusResult.frontSA - radiusResult.rearSA;
-            saturatedRadiusMap(radiusIdx, :) = radiusResult.frontSA >= slipCapDeg | radiusResult.rearSA >= slipCapDeg;
-        end
-
-        slipGapDisplayMap = slipGapRadiusMap;
-        slipGapDisplayMap(saturatedRadiusMap) = NaN;
-        finiteUnsaturatedSlipGap = slipGapDisplayMap(isfinite(slipGapDisplayMap));
-        if isempty(finiteUnsaturatedSlipGap)
-            colorLimit = 1;
+        combinedFiniteGap = [mf14Map.displayGap(isfinite(mf14Map.displayGap)); ...
+                             mf13Map.displayGap(isfinite(mf13Map.displayGap))];
+        if isempty(combinedFiniteGap)
+            sharedColorLimit = 1;
         else
-            colorLimit = max(abs(finiteUnsaturatedSlipGap));
-        end
-        arrowThreshold = 0.05; % deg; suppress near-neutral balance arrows
-
-        figure("Name", "Corner Radius Balance Map", "NumberTitle", "off");
-        balanceImage = imagesc(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap);
-        set(balanceImage, "AlphaData", isfinite(slipGapDisplayMap));
-        set(gca, "YDir", "normal");
-        colorbar;
-        if colorLimit > 0
-            clim([-colorLimit, colorLimit]);
-        end
-        hold on;
-        [gGrid, radiusGrid] = meshgrid(radiusMapG, cornerRadiusMapValues);
-        speedMphMap = sqrt(radiusGrid .* gGrid * 9.81) * 2.23694;
-        speedContourLevels = 15:5:75;
-        [speedContour, speedContourHandle] = contour(radiusMapG, cornerRadiusMapValues, speedMphMap, speedContourLevels, "w--");
-        clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
-
-        if any(saturatedRadiusMap(:))
-            scatter(gGrid(saturatedRadiusMap), radiusGrid(saturatedRadiusMap), 90, ...
-                    "s", ...
-                    "filled", ...
-                    "MarkerFaceColor", [0.1, 0.1, 0.1], ...
-                    "MarkerEdgeColor", "none", ...
-                    "MarkerFaceAlpha", 0.35);
+            sharedColorLimit = max(abs(combinedFiniteGap));
         end
 
-        contour(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap, ...
-                [-arrowThreshold, arrowThreshold], ...
-                "k:", ...
-                "LineWidth", 1.2);
+        comparisonFigure = figure("Name", "MF14 vs MF13 Corner Radius Balance", ...
+                                  "NumberTitle", "off", "Position", [100, 100, 1800, 800]);
+        comparisonLayout = tiledlayout(comparisonFigure, 1, 2, "TileSpacing", "compact", "Padding", "compact");
+        mf14Axes = nexttile(comparisonLayout);
+        plotCornerRadiusBalancePanel(mf14Axes, mf14Map, cornerRadiusMapValues, ...
+                                     sharedColorLimit, "MF14 parameters");
+        mf13Axes = nexttile(comparisonLayout);
+        plotCornerRadiusBalancePanel(mf13Axes, mf13Map, cornerRadiusMapValues, ...
+                                     sharedColorLimit, "MF13 parameters");
+        comparisonColorbar = colorbar(mf13Axes);
+        comparisonColorbar.Label.String = "Front - rear slip angle [deg]";
+        comparisonLayout.Title.String = sprintf("MF14 vs MF13 Balance: Rear ARB = %.0f N*m/deg", currentRearArb);
+        comparisonLayout.Subtitle.String = "Shared color scale and operating grid; white contours show speed [mph], gray marks the slip cap.";
 
-        quiverColIdx = unique(round(linspace(1, numel(radiusMapG), 17)));
-        quiverRowIdx = 1:numel(cornerRadiusMapValues);
-        quiverGap = slipGapDisplayMap(quiverRowIdx, quiverColIdx);
-        finiteQuiverGap = quiverGap(isfinite(quiverGap));
-        if isempty(finiteQuiverGap)
-            quiverScale = 0;
-        else
-            quiverScale = max(abs(finiteQuiverGap));
-        end
-        if quiverScale > 0
-            [quiverG, quiverRadius] = meshgrid(radiusMapG(quiverColIdx), cornerRadiusMapValues(quiverRowIdx));
-            quiverMask = isfinite(quiverGap) & abs(quiverGap) >= arrowThreshold;
-            quiverGMasked = quiverG(quiverMask);
-            quiverRadiusMasked = quiverRadius(quiverMask);
-            quiverGapMasked = quiverGap(quiverMask);
-            for arrowIdx = 1:numel(quiverGapMasked)
-                if quiverGapMasked(arrowIdx) > 0
-                    arrowText = "\rightarrow";
-                else
-                    arrowText = "\leftarrow";
-                end
-                arrowSize = 13 + 6 * min(abs(quiverGapMasked(arrowIdx)) / quiverScale, 1);
-                text(quiverGMasked(arrowIdx) + 0.0015, quiverRadiusMasked(arrowIdx) - 0.12, arrowText, ...
-                     "Color", "k", ...
-                     "FontSize", arrowSize, ...
-                     "FontWeight", "bold", ...
-                     "HorizontalAlignment", "center", ...
-                     "VerticalAlignment", "middle");
-                text(quiverGMasked(arrowIdx), quiverRadiusMasked(arrowIdx), arrowText, ...
-                     "Color", "w", ...
-                     "FontSize", arrowSize, ...
-                     "FontWeight", "bold", ...
-                     "HorizontalAlignment", "center", ...
-                     "VerticalAlignment", "middle");
-            end
-            text(radiusMapG(2), cornerRadiusMapValues(end) - 2, "\rightarrow understeer", "Color", "k", "FontWeight", "bold");
-            text(radiusMapG(2), cornerRadiusMapValues(end) - 5, "\leftarrow oversteer", "Color", "k", "FontWeight", "bold");
-            text(radiusMapG(2), cornerRadiusMapValues(end) - 8, "dotted = near neutral", "Color", "k", "FontWeight", "bold");
-            if any(saturatedRadiusMap(:))
-                text(radiusMapG(2), cornerRadiusMapValues(end) - 11, "gray = slip cap", "Color", "k", "FontWeight", "bold");
-            end
-        end
-        hold off;
-        xlabel("Lateral acceleration [g]");
-        ylabel("Corner radius [m]");
-        title(sprintf("Vehicle Balance Across Corner Radius: Rear ARB = %.0f N*m/deg", currentRearArb));
-        subtitle("Color shows front - rear slip angle [deg]; arrows show balance direction; white contours label speed [mph].");
-        mapOutputName = sprintf('corner_radius_balance_map_kRoll_r_arb_%g.png', currentRearArb);
-        saveas(gcf, fullfile(outputDir, mapOutputName));
+        mapOutputName = sprintf('corner_radius_balance_MF14_vs_MF13_kRoll_r_arb_%g.png', currentRearArb);
+        saveas(comparisonFigure, fullfile(outputDir, mapOutputName));
     end
 end
 %% Steering Forces
@@ -810,6 +867,77 @@ if ~generateOnlyCornerRadiusBalanceMap
     subtitle({"Depicts: steering column torque required for each front geometry case.", ...
               "Optimize: balance feedback and effort by tuning trail, scrub radius, caster, KPI, and steering ratio."});
     saveas(gcf, fullfile(outputDir, 'steering_column_torque_comparison.png'));
+end
+
+function mapResult = calculateCornerRadiusMap(baseParams, radiusValues, ...
+                                              P, L, PM, LMZ, sampleCount, slipCapDeg)
+    for radiusIdx = 1:numel(radiusValues)
+        radiusParams = baseParams;
+        radiusParams.r_corner = radiusValues(radiusIdx);
+        radiusResult = evaluateVehicleBalance(radiusParams, P, L, PM, LMZ, sampleCount);
+        if radiusIdx == 1
+            mapResult.g = radiusResult.g;
+            mapResult.slipGap = nan(numel(radiusValues), numel(mapResult.g));
+            mapResult.saturated = false(numel(radiusValues), numel(mapResult.g));
+        end
+        mapResult.slipGap(radiusIdx, :) = radiusResult.frontSA - radiusResult.rearSA;
+        mapResult.saturated(radiusIdx, :) = radiusResult.frontSA >= slipCapDeg | ...
+                                                  radiusResult.rearSA >= slipCapDeg;
+    end
+    mapResult.displayGap = mapResult.slipGap;
+    mapResult.displayGap(mapResult.saturated) = NaN;
+end
+
+function plotCornerRadiusBalancePanel(ax, mapResult, radiusValues, colorLimit, panelTitle)
+    arrowThreshold = 0.05;
+    balanceImage = imagesc(ax, mapResult.g, radiusValues, mapResult.displayGap);
+    set(balanceImage, "AlphaData", isfinite(mapResult.displayGap));
+    set(ax, "YDir", "normal");
+    clim(ax, [-colorLimit, colorLimit]);
+    hold(ax, "on");
+
+    [gGrid, radiusGrid] = meshgrid(mapResult.g, radiusValues);
+    speedMphMap = sqrt(radiusGrid .* gGrid * 9.81) * 2.23694;
+    [speedContour, speedContourHandle] = contour(ax, mapResult.g, radiusValues, speedMphMap, ...
+                                                  15:5:75, "w--");
+    clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
+
+    if any(mapResult.saturated(:))
+        scatter(ax, gGrid(mapResult.saturated), radiusGrid(mapResult.saturated), 55, ...
+                "s", "filled", "MarkerFaceColor", [0.1, 0.1, 0.1], ...
+                "MarkerEdgeColor", "none", "MarkerFaceAlpha", 0.35);
+    end
+    contour(ax, mapResult.g, radiusValues, mapResult.displayGap, ...
+            [-arrowThreshold, arrowThreshold], "k:", "LineWidth", 1.2);
+
+    arrowColIdx = unique(round(linspace(1, numel(mapResult.g), 13)));
+    arrowGap = mapResult.displayGap(:, arrowColIdx);
+    finiteArrowGap = arrowGap(isfinite(arrowGap));
+    if ~isempty(finiteArrowGap)
+        arrowScale = max(abs(finiteArrowGap));
+        [arrowG, arrowRadius] = meshgrid(mapResult.g(arrowColIdx), radiusValues);
+        arrowMask = isfinite(arrowGap) & abs(arrowGap) >= arrowThreshold;
+        arrowGap = arrowGap(arrowMask);
+        arrowG = arrowG(arrowMask);
+        arrowRadius = arrowRadius(arrowMask);
+        for arrowIdx = 1:numel(arrowGap)
+            if arrowGap(arrowIdx) > 0
+                arrowText = "\rightarrow";
+            else
+                arrowText = "\leftarrow";
+            end
+            arrowSize = 11 + 5 * min(abs(arrowGap(arrowIdx)) / arrowScale, 1);
+            text(ax, arrowG(arrowIdx), arrowRadius(arrowIdx), arrowText, ...
+                 "Color", "w", "FontSize", arrowSize, "FontWeight", "bold", ...
+                 "HorizontalAlignment", "center", "VerticalAlignment", "middle");
+        end
+    end
+
+    xlabel(ax, "Lateral acceleration [g]");
+    ylabel(ax, "Corner radius [m]");
+    title(ax, panelTitle);
+    grid(ax, "off");
+    hold(ax, "off");
 end
 
 function result = evaluateVehicleBalance(params, P, L, PM, LMZ, sampleCount)
@@ -935,9 +1063,9 @@ function result = evaluateVehicleBalance(params, P, L, PM, LMZ, sampleCount)
                                      wheelLoads{2, 1}; wheelLoads{2, 2}], [], 1);
 end
 
-function metrics = evaluateAeroBalanceCandidates(candidateValues, radii, baseParams, ...
-                                                  P, L, PM, LMZ, sampleCount, slipCapDeg, ...
-                                                  targetSlipGap, saturationPenalty, wheelLiftPenalty)
+function metrics = evaluateBalanceParameterCandidates(candidateValues, parameterName, radii, baseParams, ...
+                                                       P, L, PM, LMZ, sampleCount, slipCapDeg, ...
+                                                       targetSlipGap, saturationPenalty, wheelLiftPenalty)
     candidateCount = numel(candidateValues);
     metrics.objective = inf(size(candidateValues));
     metrics.rmsSlipGapError = inf(size(candidateValues));
@@ -953,7 +1081,7 @@ function metrics = evaluateAeroBalanceCandidates(candidateValues, radii, basePar
 
         for radiusIdx = 1:numel(radii)
             candidateParams = baseParams;
-            candidateParams.DFDistF = candidateValues(candidateIdx);
+            candidateParams.(char(parameterName)) = candidateValues(candidateIdx);
             candidateParams.r_corner = radii(radiusIdx);
             candidateResult = evaluateVehicleBalance(candidateParams, P, L, PM, LMZ, sampleCount);
 
