@@ -32,6 +32,9 @@ if ~exist(outputDir, 'dir')
     mkdir(outputDir);
 end
 
+% Temporary output mode: generate only the corner-radius balance map.
+generateOnlyCornerRadiusBalanceMap = true;
+
 %% Background
 % This script is a tool for estimating the steady-state cornering balance
 % for a given setup. The primary tuning items of interest are weight
@@ -117,7 +120,7 @@ CLCD = CL / CD;
 DFDistFMin = 0.41;
 DFDistFMax = 0.43;
 % DFDistF = (DFDistFMax - DFDistFMin) / 2 + DFDistFMin;  % accounts for moment created by drag force
-DFDistF = 0.37;
+DFDistF = 0.43;
 CLCD = getOverrideValue(overrideParams, "CLCD", CLCD);
 DFDistF = getOverrideValue(overrideParams, "DFDistF", DFDistF);
 LF = @(V) 1 / 2 * 1.225 * V.^2 * CL * 1.08 * 0.224809;   % downforce, lbf
@@ -128,7 +131,7 @@ rc_zf = 2.329; % roll center height front
 rc_zr = 2.644; % roll center height rear
 
 kRoll_f_arb = 0; % front ARB stiffness in N*m/deg
-kRoll_r_arb = 600;   % (MF12 = 550) 200-400 target
+kRoll_r_arb = 100;   % baseline rear ARB stiffness in N*m/deg
 rc_zf = getOverrideValue(overrideParams, "rc_zf", rc_zf);
 rc_zr = getOverrideValue(overrideParams, "rc_zr", rc_zr);
 kRoll_f_arb = getOverrideValue(overrideParams, "kRoll_f_arb", kRoll_f_arb);
@@ -146,13 +149,39 @@ runParameterSweep = getOverrideValue(overrideParams, "runParameterSweep", runPar
 sweepTargetG = getOverrideValue(overrideParams, "sweepTargetG", sweepTargetG);
 sweepSampleCount = getOverrideValue(overrideParams, "sweepSampleCount", sweepSampleCount);
 slipCapDeg = getOverrideValue(overrideParams, "slipCapDeg", slipCapDeg);
+if generateOnlyCornerRadiusBalanceMap
+    runParameterSweep = false;
+end
 
 %% Corner Radius Balance Map
 runCornerRadiusBalanceMap = true;
 cornerRadiusMapValues = [5, 7.5, 10, 12.5, 15, 20, 30, 50, 60, 70]; % m
+cornerRadiusMapRearArbValues = 0:50:300; % N*m/deg; one balance map per value
 cornerRadiusMapSampleCount = 200;
 runCornerRadiusBalanceMap = getOverrideValue(overrideParams, "runCornerRadiusBalanceMap", runCornerRadiusBalanceMap);
 cornerRadiusMapSampleCount = getOverrideValue(overrideParams, "cornerRadiusMapSampleCount", cornerRadiusMapSampleCount);
+cornerRadiusMapRearArbValues = getOverrideValue(overrideParams, "cornerRadiusMapRearArbValues", cornerRadiusMapRearArbValues);
+if generateOnlyCornerRadiusBalanceMap
+    runCornerRadiusBalanceMap = true;
+end
+
+%% Aero Balance Optimization
+runAeroBalanceOptimization = true;
+aeroOptimizationRadii = [10, 20, 30, 50]; % representative corner radii [m]
+aeroOptimizationGValues = [1.25, 1.50, 1.75, 2.00];
+aeroOptimizationCoarseValues = 0.30:0.025:0.55;
+aeroOptimizationFineHalfRange = 0.025;
+aeroOptimizationFineStep = 0.005;
+aeroOptimizationTargetSlipGap = 0.10; % deg; slight-understeer target
+aeroOptimizationSaturationPenalty = 4; % objective penalty per saturated fraction
+aeroOptimizationWheelLiftPenalty = 4; % objective penalty per wheel-lift fraction
+runAeroBalanceOptimization = getOverrideValue(overrideParams, "runAeroBalanceOptimization", runAeroBalanceOptimization);
+aeroOptimizationRadii = getOverrideValue(overrideParams, "aeroOptimizationRadii", aeroOptimizationRadii);
+aeroOptimizationGValues = getOverrideValue(overrideParams, "aeroOptimizationGValues", aeroOptimizationGValues);
+aeroOptimizationCoarseValues = getOverrideValue(overrideParams, "aeroOptimizationCoarseValues", aeroOptimizationCoarseValues);
+aeroOptimizationFineHalfRange = getOverrideValue(overrideParams, "aeroOptimizationFineHalfRange", aeroOptimizationFineHalfRange);
+aeroOptimizationFineStep = getOverrideValue(overrideParams, "aeroOptimizationFineStep", aeroOptimizationFineStep);
+aeroOptimizationTargetSlipGap = getOverrideValue(overrideParams, "aeroOptimizationTargetSlipGap", aeroOptimizationTargetSlipGap);
 
 kWheel_f = 295; % wheel rate lbf/in %370, 307.5
 kWheel_r = 273; % 327, 272.5
@@ -306,71 +335,73 @@ for i = 1:n
     rearSA(i) = findSlip(wheelLoads{2, 1}(i), rearLoad(i), Fy_rear(i), IA3(i), IA4(i), toeR, P, L);
 end
 
-figure("Name", "Front vs Rear Slip Angle", "NumberTitle", "off");
-plot(a_y / 32.2, frontSA);
-hold on;
-grid on;
-plot(a_y / 32.2, rearSA);
-ylabel("SA (deg)");
-xlabel("Cornering g-force");
-title("Comparison of Front vs Rear Slip Angle");
-legend("Front", "Rear");
-subtitle({"Depicts: axle slip angles required to meet lateral force demand.", ...
-          "Optimize: target a smooth, small front-rear gap; front higher than rear trends understeer, rear higher trends oversteer."});
-hold off;
-saveas(gcf, fullfile(outputDir, 'front_vs_rear_slip_angle.png'));
+if ~generateOnlyCornerRadiusBalanceMap
+    figure("Name", "Front vs Rear Slip Angle", "NumberTitle", "off");
+    plot(a_y / 32.2, frontSA);
+    hold on;
+    grid on;
+    plot(a_y / 32.2, rearSA);
+    ylabel("SA (deg)");
+    xlabel("Cornering g-force");
+    title("Comparison of Front vs Rear Slip Angle");
+    legend("Front", "Rear");
+    subtitle({"Depicts: axle slip angles required to meet lateral force demand.", ...
+              "Optimize: target a smooth, small front-rear gap; front higher than rear trends understeer, rear higher trends oversteer."});
+    hold off;
+    saveas(gcf, fullfile(outputDir, 'front_vs_rear_slip_angle.png'));
 
-figure("Name", "Required Lateral Grip", "NumberTitle", "off");
-plot(a_y / 32.2, Fy_front);
-hold on;
-grid on;
-plot(a_y / 32.2, Fy_rear);
-ylabel("Required Lateral Grip (lbf)");
-xlabel("Cornering g-force");
-title("Required Front vs Rear Lateral Grip");
-legend("Front", "Rear");
-subtitle({"Depicts: lateral force demand assigned to each axle after balance corrections.", ...
-          "Optimize: shift aero, weight, roll stiffness, camber, or tire capacity toward the axle reaching its grip limit first."});
-hold off;
-saveas(gcf, fullfile(outputDir, 'required_lateral_grip.png'));
+    figure("Name", "Required Lateral Grip", "NumberTitle", "off");
+    plot(a_y / 32.2, Fy_front);
+    hold on;
+    grid on;
+    plot(a_y / 32.2, Fy_rear);
+    ylabel("Required Lateral Grip (lbf)");
+    xlabel("Cornering g-force");
+    title("Required Front vs Rear Lateral Grip");
+    legend("Front", "Rear");
+    subtitle({"Depicts: lateral force demand assigned to each axle after balance corrections.", ...
+              "Optimize: shift aero, weight, roll stiffness, camber, or tire capacity toward the axle reaching its grip limit first."});
+    hold off;
+    saveas(gcf, fullfile(outputDir, 'required_lateral_grip.png'));
 
-figure("Name", "Front vs Rear Load Transfer", "NumberTitle", "off");
-plot(a_y / 32.2, wheelLoads{1, 1} - wheelLoads{1, 2});
-hold on;
-grid on;
-plot(a_y / 32.2, wheelLoads{2, 1} - wheelLoads{2, 2});
-ylabel("Load Transfer (lbf)");
-xlabel("Cornering g-force");
-title("Front vs Rear Lateral Load Transfer");
-legend("Front", "Rear");
-subtitle({"Depicts: inside-to-outside normal load transfer at each axle.", ...
-          "Optimize: reduce excessive transfer at the limiting axle; lower CG, widen track, or shift roll stiffness away from that axle."});
-hold off;
-saveas(gcf, fullfile(outputDir, 'front_vs_rear_load_transfer.png'));
+    figure("Name", "Front vs Rear Load Transfer", "NumberTitle", "off");
+    plot(a_y / 32.2, wheelLoads{1, 1} - wheelLoads{1, 2});
+    hold on;
+    grid on;
+    plot(a_y / 32.2, wheelLoads{2, 1} - wheelLoads{2, 2});
+    ylabel("Load Transfer (lbf)");
+    xlabel("Cornering g-force");
+    title("Front vs Rear Lateral Load Transfer");
+    legend("Front", "Rear");
+    subtitle({"Depicts: inside-to-outside normal load transfer at each axle.", ...
+              "Optimize: reduce excessive transfer at the limiting axle; lower CG, widen track, or shift roll stiffness away from that axle."});
+    hold off;
+    saveas(gcf, fullfile(outputDir, 'front_vs_rear_load_transfer.png'));
 
-figure("Name", "Inside Wheel Loads", "NumberTitle", "off");
-plot(a_y / 32.2, wheelLoads{1, 2});
-hold on;
-grid on;
-plot(a_y / 32.2, wheelLoads{2, 2});
-ylabel("Inside Load (lbf)");
-xlabel("Cornering g-force");
-title("Inside Front vs Rear Wheel Loads");
-legend("Front", "Rear");
-subtitle({"Depicts: inside tire vertical load as lateral acceleration increases.", ...
-          "Optimize: keep inside loads positive and useful; avoid unloading with excessive roll stiffness, high CG, or narrow track."});
-hold off;
-saveas(gcf, fullfile(outputDir, 'inside_wheel_loads.png'));
-%% Plot Understeer Gradient
-figure("Name", "Understeer Gradient", "NumberTitle", "off");
-theta_steer = frontSA - rearSA + (abs(delta1) + abs(delta2)) / 2;
-plot(a_y / 32.2, theta_steer);
-xlabel("Lateral Acceleration [g]");
-ylabel("Steering Angle [deg]");
-title(sprintf("Understeer Gradient for %.0f m Radius Corner", r_corner));
-subtitle({"Depicts: steering angle required as lateral acceleration rises.", ...
-          "Optimize: target a smooth, predictable, slightly positive gradient; reduce slope for less understeer and avoid negative slope at the limit."});
-saveas(gcf, fullfile(outputDir, 'understeer_gradient.png'));
+    figure("Name", "Inside Wheel Loads", "NumberTitle", "off");
+    plot(a_y / 32.2, wheelLoads{1, 2});
+    hold on;
+    grid on;
+    plot(a_y / 32.2, wheelLoads{2, 2});
+    ylabel("Inside Load (lbf)");
+    xlabel("Cornering g-force");
+    title("Inside Front vs Rear Wheel Loads");
+    legend("Front", "Rear");
+    subtitle({"Depicts: inside tire vertical load as lateral acceleration increases.", ...
+              "Optimize: keep inside loads positive and useful; avoid unloading with excessive roll stiffness, high CG, or narrow track."});
+    hold off;
+    saveas(gcf, fullfile(outputDir, 'inside_wheel_loads.png'));
+    %% Plot Understeer Gradient
+    figure("Name", "Understeer Gradient", "NumberTitle", "off");
+    theta_steer = frontSA - rearSA + (abs(delta1) + abs(delta2)) / 2;
+    plot(a_y / 32.2, theta_steer);
+    xlabel("Lateral Acceleration [g]");
+    ylabel("Steering Angle [deg]");
+    title(sprintf("Understeer Gradient for %.0f m Radius Corner", r_corner));
+    subtitle({"Depicts: steering angle required as lateral acceleration rises.", ...
+              "Optimize: target a smooth, predictable, slightly positive gradient; reduce slope for less understeer and avoid negative slope at the limit."});
+    saveas(gcf, fullfile(outputDir, 'understeer_gradient.png'));
+end
 
 %% Parameter Sweep Results
 if runParameterSweep
@@ -495,108 +526,172 @@ if runCornerRadiusBalanceMap
                                  'kWheel_f', kWheel_f, ...
                                  'kWheel_r', kWheel_r);
 
-    for radiusIdx = 1:numel(cornerRadiusMapValues)
-        radiusMapParams = radiusMapBaseParams;
-        radiusMapParams.r_corner = cornerRadiusMapValues(radiusIdx);
-        radiusResult = evaluateVehicleBalance(radiusMapParams, P, L, PM, LMZ, cornerRadiusMapSampleCount);
+    if runAeroBalanceOptimization
+        aeroOptimizationBaseParams = radiusMapBaseParams;
+        aeroOptimizationBaseParams.a_y = aeroOptimizationGValues * 32.2;
+        aeroOptimizationBaseParams.a_x = zeros(size(aeroOptimizationGValues));
+        coarseAeroMetrics = evaluateAeroBalanceCandidates( ...
+            aeroOptimizationCoarseValues, aeroOptimizationRadii, aeroOptimizationBaseParams, ...
+            P, L, PM, LMZ, numel(aeroOptimizationGValues), slipCapDeg, ...
+            aeroOptimizationTargetSlipGap, aeroOptimizationSaturationPenalty, ...
+            aeroOptimizationWheelLiftPenalty);
+        [~, coarseBestIdx] = min(coarseAeroMetrics.objective);
+        coarseBestValue = aeroOptimizationCoarseValues(coarseBestIdx);
+        fineAeroValues = unique(max(0, coarseBestValue - aeroOptimizationFineHalfRange): ...
+                                aeroOptimizationFineStep: ...
+                                min(1, coarseBestValue + aeroOptimizationFineHalfRange));
+        fineAeroMetrics = evaluateAeroBalanceCandidates( ...
+            fineAeroValues, aeroOptimizationRadii, aeroOptimizationBaseParams, ...
+            P, L, PM, LMZ, numel(aeroOptimizationGValues), slipCapDeg, ...
+            aeroOptimizationTargetSlipGap, aeroOptimizationSaturationPenalty, ...
+            aeroOptimizationWheelLiftPenalty);
+        [bestAeroObjective, bestAeroIdx] = min(fineAeroMetrics.objective);
+        optimalDFDistF = fineAeroValues(bestAeroIdx);
 
-        if radiusIdx == 1
-            radiusMapG = radiusResult.g;
-            slipGapRadiusMap = nan(numel(cornerRadiusMapValues), numel(radiusMapG));
-            saturatedRadiusMap = false(numel(cornerRadiusMapValues), numel(radiusMapG));
-        end
+        fprintf("Aero optimization: optimal DFDistF = %.3f (objective %.3f deg-equivalent)\n", ...
+                optimalDFDistF, bestAeroObjective);
+        fprintf("  RMS slip-gap error = %.3f deg, saturation = %.1f%%, wheel lift = %.1f%%\n", ...
+                fineAeroMetrics.rmsSlipGapError(bestAeroIdx), ...
+                100 * fineAeroMetrics.saturationFraction(bestAeroIdx), ...
+                100 * fineAeroMetrics.wheelLiftFraction(bestAeroIdx));
 
-        slipGapRadiusMap(radiusIdx, :) = radiusResult.frontSA - radiusResult.rearSA;
-        saturatedRadiusMap(radiusIdx, :) = radiusResult.frontSA >= slipCapDeg | radiusResult.rearSA >= slipCapDeg;
+        figure("Name", "Aero Balance Optimization", "NumberTitle", "off");
+        subplot(2, 1, 1);
+        plot(aeroOptimizationCoarseValues, coarseAeroMetrics.objective, "o-", "DisplayName", "Coarse search");
+        hold on;
+        plot(fineAeroValues, fineAeroMetrics.objective, ".-", "LineWidth", 1.5, "MarkerSize", 14, "DisplayName", "Fine search");
+        xline(optimalDFDistF, "--", sprintf("Optimum %.3f", optimalDFDistF));
+        grid on;
+        ylabel("Penalized objective [deg-equivalent]");
+        title(sprintf("Aero Balance Optimization at Rear ARB = %.0f N*m/deg", kRoll_r_arb));
+        legend("Location", "best");
+        hold off;
+
+        subplot(2, 1, 2);
+        plot(fineAeroValues, fineAeroMetrics.rmsSlipGapError, "o-", "DisplayName", "RMS balance error [deg]");
+        hold on;
+        plot(fineAeroValues, 100 * fineAeroMetrics.saturationFraction, "o-", "DisplayName", "Saturated points [%]");
+        plot(fineAeroValues, 100 * fineAeroMetrics.wheelLiftFraction, "o-", "DisplayName", "Wheel-lift points [%]");
+        xline(optimalDFDistF, "--");
+        grid on;
+        xlabel("Front downforce distribution");
+        ylabel("Metric value");
+        legend("Location", "best");
+        subtitle(sprintf("Target gap = %.2f deg across radii %s m and g points %s", ...
+                         aeroOptimizationTargetSlipGap, mat2str(aeroOptimizationRadii), ...
+                         mat2str(aeroOptimizationGValues)));
+        hold off;
+        saveas(gcf, fullfile(outputDir, 'aero_balance_optimization.png'));
     end
 
-    slipGapDisplayMap = slipGapRadiusMap;
-    slipGapDisplayMap(saturatedRadiusMap) = NaN;
-    finiteUnsaturatedSlipGap = slipGapDisplayMap(isfinite(slipGapDisplayMap));
-    if isempty(finiteUnsaturatedSlipGap)
-        colorLimit = 1;
-    else
-        colorLimit = max(abs(finiteUnsaturatedSlipGap));
-    end
-    arrowThreshold = 0.05; % deg; suppress near-neutral balance arrows
+    for arbMapIdx = 1:numel(cornerRadiusMapRearArbValues)
+        currentRearArb = cornerRadiusMapRearArbValues(arbMapIdx);
+        radiusMapBaseParams.kRoll_r_arb = currentRearArb;
 
-    figure("Name", "Corner Radius Balance Map", "NumberTitle", "off");
-    balanceImage = imagesc(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap);
-    set(balanceImage, "AlphaData", isfinite(slipGapDisplayMap));
-    set(gca, "YDir", "normal");
-    colorbar;
-    if colorLimit > 0
-        clim([-colorLimit, colorLimit]);
-    end
-    hold on;
-    [gGrid, radiusGrid] = meshgrid(radiusMapG, cornerRadiusMapValues);
-    speedMphMap = sqrt(radiusGrid .* gGrid * 9.81) * 2.23694;
-    speedContourLevels = 15:5:75;
-    [speedContour, speedContourHandle] = contour(radiusMapG, cornerRadiusMapValues, speedMphMap, speedContourLevels, "w--");
-    clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
+        for radiusIdx = 1:numel(cornerRadiusMapValues)
+            radiusMapParams = radiusMapBaseParams;
+            radiusMapParams.r_corner = cornerRadiusMapValues(radiusIdx);
+            radiusResult = evaluateVehicleBalance(radiusMapParams, P, L, PM, LMZ, cornerRadiusMapSampleCount);
 
-    if any(saturatedRadiusMap(:))
-        scatter(gGrid(saturatedRadiusMap), radiusGrid(saturatedRadiusMap), 90, ...
-                "s", ...
-                "filled", ...
-                "MarkerFaceColor", [0.1, 0.1, 0.1], ...
-                "MarkerEdgeColor", "none", ...
-                "MarkerFaceAlpha", 0.35);
-    end
-
-    contour(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap, ...
-            [-arrowThreshold, arrowThreshold], ...
-            "k:", ...
-            "LineWidth", 1.2);
-
-    quiverColIdx = unique(round(linspace(1, numel(radiusMapG), 17)));
-    quiverRowIdx = 1:numel(cornerRadiusMapValues);
-    quiverGap = slipGapDisplayMap(quiverRowIdx, quiverColIdx);
-    finiteQuiverGap = quiverGap(isfinite(quiverGap));
-    if isempty(finiteQuiverGap)
-        quiverScale = 0;
-    else
-        quiverScale = max(abs(finiteQuiverGap));
-    end
-    if quiverScale > 0
-        [quiverG, quiverRadius] = meshgrid(radiusMapG(quiverColIdx), cornerRadiusMapValues(quiverRowIdx));
-        quiverMask = isfinite(quiverGap) & abs(quiverGap) >= arrowThreshold;
-        quiverGMasked = quiverG(quiverMask);
-        quiverRadiusMasked = quiverRadius(quiverMask);
-        quiverGapMasked = quiverGap(quiverMask);
-        for arrowIdx = 1:numel(quiverGapMasked)
-            if quiverGapMasked(arrowIdx) > 0
-                arrowText = "\rightarrow";
-            else
-                arrowText = "\leftarrow";
+            if radiusIdx == 1
+                radiusMapG = radiusResult.g;
+                slipGapRadiusMap = nan(numel(cornerRadiusMapValues), numel(radiusMapG));
+                saturatedRadiusMap = false(numel(cornerRadiusMapValues), numel(radiusMapG));
             end
-            arrowSize = 13 + 6 * min(abs(quiverGapMasked(arrowIdx)) / quiverScale, 1);
-            text(quiverGMasked(arrowIdx) + 0.0015, quiverRadiusMasked(arrowIdx) - 0.12, arrowText, ...
-                 "Color", "k", ...
-                 "FontSize", arrowSize, ...
-                 "FontWeight", "bold", ...
-                 "HorizontalAlignment", "center", ...
-                 "VerticalAlignment", "middle");
-            text(quiverGMasked(arrowIdx), quiverRadiusMasked(arrowIdx), arrowText, ...
-                 "Color", "w", ...
-                 "FontSize", arrowSize, ...
-                 "FontWeight", "bold", ...
-                 "HorizontalAlignment", "center", ...
-                 "VerticalAlignment", "middle");
+
+            slipGapRadiusMap(radiusIdx, :) = radiusResult.frontSA - radiusResult.rearSA;
+            saturatedRadiusMap(radiusIdx, :) = radiusResult.frontSA >= slipCapDeg | radiusResult.rearSA >= slipCapDeg;
         end
-        text(radiusMapG(2), cornerRadiusMapValues(end) - 2, "\rightarrow understeer", "Color", "k", "FontWeight", "bold");
-        text(radiusMapG(2), cornerRadiusMapValues(end) - 5, "\leftarrow oversteer", "Color", "k", "FontWeight", "bold");
-        text(radiusMapG(2), cornerRadiusMapValues(end) - 8, "dotted = near neutral", "Color", "k", "FontWeight", "bold");
+
+        slipGapDisplayMap = slipGapRadiusMap;
+        slipGapDisplayMap(saturatedRadiusMap) = NaN;
+        finiteUnsaturatedSlipGap = slipGapDisplayMap(isfinite(slipGapDisplayMap));
+        if isempty(finiteUnsaturatedSlipGap)
+            colorLimit = 1;
+        else
+            colorLimit = max(abs(finiteUnsaturatedSlipGap));
+        end
+        arrowThreshold = 0.05; % deg; suppress near-neutral balance arrows
+
+        figure("Name", "Corner Radius Balance Map", "NumberTitle", "off");
+        balanceImage = imagesc(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap);
+        set(balanceImage, "AlphaData", isfinite(slipGapDisplayMap));
+        set(gca, "YDir", "normal");
+        colorbar;
+        if colorLimit > 0
+            clim([-colorLimit, colorLimit]);
+        end
+        hold on;
+        [gGrid, radiusGrid] = meshgrid(radiusMapG, cornerRadiusMapValues);
+        speedMphMap = sqrt(radiusGrid .* gGrid * 9.81) * 2.23694;
+        speedContourLevels = 15:5:75;
+        [speedContour, speedContourHandle] = contour(radiusMapG, cornerRadiusMapValues, speedMphMap, speedContourLevels, "w--");
+        clabel(speedContour, speedContourHandle, "Color", "w", "FontWeight", "bold");
+
         if any(saturatedRadiusMap(:))
-            text(radiusMapG(2), cornerRadiusMapValues(end) - 11, "gray = slip cap", "Color", "k", "FontWeight", "bold");
+            scatter(gGrid(saturatedRadiusMap), radiusGrid(saturatedRadiusMap), 90, ...
+                    "s", ...
+                    "filled", ...
+                    "MarkerFaceColor", [0.1, 0.1, 0.1], ...
+                    "MarkerEdgeColor", "none", ...
+                    "MarkerFaceAlpha", 0.35);
         end
+
+        contour(radiusMapG, cornerRadiusMapValues, slipGapDisplayMap, ...
+                [-arrowThreshold, arrowThreshold], ...
+                "k:", ...
+                "LineWidth", 1.2);
+
+        quiverColIdx = unique(round(linspace(1, numel(radiusMapG), 17)));
+        quiverRowIdx = 1:numel(cornerRadiusMapValues);
+        quiverGap = slipGapDisplayMap(quiverRowIdx, quiverColIdx);
+        finiteQuiverGap = quiverGap(isfinite(quiverGap));
+        if isempty(finiteQuiverGap)
+            quiverScale = 0;
+        else
+            quiverScale = max(abs(finiteQuiverGap));
+        end
+        if quiverScale > 0
+            [quiverG, quiverRadius] = meshgrid(radiusMapG(quiverColIdx), cornerRadiusMapValues(quiverRowIdx));
+            quiverMask = isfinite(quiverGap) & abs(quiverGap) >= arrowThreshold;
+            quiverGMasked = quiverG(quiverMask);
+            quiverRadiusMasked = quiverRadius(quiverMask);
+            quiverGapMasked = quiverGap(quiverMask);
+            for arrowIdx = 1:numel(quiverGapMasked)
+                if quiverGapMasked(arrowIdx) > 0
+                    arrowText = "\rightarrow";
+                else
+                    arrowText = "\leftarrow";
+                end
+                arrowSize = 13 + 6 * min(abs(quiverGapMasked(arrowIdx)) / quiverScale, 1);
+                text(quiverGMasked(arrowIdx) + 0.0015, quiverRadiusMasked(arrowIdx) - 0.12, arrowText, ...
+                     "Color", "k", ...
+                     "FontSize", arrowSize, ...
+                     "FontWeight", "bold", ...
+                     "HorizontalAlignment", "center", ...
+                     "VerticalAlignment", "middle");
+                text(quiverGMasked(arrowIdx), quiverRadiusMasked(arrowIdx), arrowText, ...
+                     "Color", "w", ...
+                     "FontSize", arrowSize, ...
+                     "FontWeight", "bold", ...
+                     "HorizontalAlignment", "center", ...
+                     "VerticalAlignment", "middle");
+            end
+            text(radiusMapG(2), cornerRadiusMapValues(end) - 2, "\rightarrow understeer", "Color", "k", "FontWeight", "bold");
+            text(radiusMapG(2), cornerRadiusMapValues(end) - 5, "\leftarrow oversteer", "Color", "k", "FontWeight", "bold");
+            text(radiusMapG(2), cornerRadiusMapValues(end) - 8, "dotted = near neutral", "Color", "k", "FontWeight", "bold");
+            if any(saturatedRadiusMap(:))
+                text(radiusMapG(2), cornerRadiusMapValues(end) - 11, "gray = slip cap", "Color", "k", "FontWeight", "bold");
+            end
+        end
+        hold off;
+        xlabel("Lateral acceleration [g]");
+        ylabel("Corner radius [m]");
+        title(sprintf("Vehicle Balance Across Corner Radius: Rear ARB = %.0f N*m/deg", currentRearArb));
+        subtitle("Color shows front - rear slip angle [deg]; arrows show balance direction; white contours label speed [mph].");
+        mapOutputName = sprintf('corner_radius_balance_map_kRoll_r_arb_%g.png', currentRearArb);
+        saveas(gcf, fullfile(outputDir, mapOutputName));
     end
-    hold off;
-    xlabel("Lateral acceleration [g]");
-    ylabel("Corner radius [m]");
-    title("Vehicle Balance Across Corner Radius");
-    subtitle("Color shows front - rear slip angle [deg]; arrows show balance direction; white contours label speed [mph].");
-    saveas(gcf, fullfile(outputDir, 'corner_radius_balance_map.png'));
 end
 %% Steering Forces
 d = 0.579; % scrub radius (in)
@@ -685,35 +780,37 @@ T_column2 = F_rack * r_pinion; % steering column torque (lbf-in)
 D_wheel = 8.5; % steering wheel diameter (in)
 F_wheel2 = -T_column2 / D_wheel; % steering wheel force in each hand (lbf)
 
-figure("Name", "Steering Wheel Force Comparison", "NumberTitle", "off");
-plot(a_y / 32.2, F_wheel);
-hold on;
-plot(a_y / 32.2, F_wheel1);
-plot(a_y / 32.2, F_wheel2);
-xlim([0.8, 1.9]);
-xlabel("Cornering G-force");
-ylabel("Steering Force (lbf)");
-legend("MF14", "MF12", "MF11");
-grid on;
-title("Steering Force at 10 deg Steering Angle, 8.5 in Wheel");
-subtitle({"Depicts: driver hand force from vertical load, lateral force, and aligning torque.", ...
-          "Optimize: keep effort high enough for feedback but not fatiguing; tune trail, scrub radius, caster, KPI, and steering ratio."});
-saveas(gcf, fullfile(outputDir, 'steering_wheel_force_comparison.png'));
+if ~generateOnlyCornerRadiusBalanceMap
+    figure("Name", "Steering Wheel Force Comparison", "NumberTitle", "off");
+    plot(a_y / 32.2, F_wheel);
+    hold on;
+    plot(a_y / 32.2, F_wheel1);
+    plot(a_y / 32.2, F_wheel2);
+    xlim([0.8, 1.9]);
+    xlabel("Cornering G-force");
+    ylabel("Steering Force (lbf)");
+    legend("MF14", "MF12", "MF11");
+    grid on;
+    title("Steering Force at 10 deg Steering Angle, 8.5 in Wheel");
+    subtitle({"Depicts: driver hand force from vertical load, lateral force, and aligning torque.", ...
+              "Optimize: keep effort high enough for feedback but not fatiguing; tune trail, scrub radius, caster, KPI, and steering ratio."});
+    saveas(gcf, fullfile(outputDir, 'steering_wheel_force_comparison.png'));
 
-figure("Name", "Steering Column Torque Comparison", "NumberTitle", "off");
-plot(a_y / 32.2, -T_column);
-hold on;
-plot(a_y / 32.2, -T_column1);
-plot(a_y / 32.2, -T_column2);
-xlim([0.8, 1.9]);
-xlabel("Cornering G-force");
-ylabel("Column Torque (lbf-in)");
-legend("MF14", "MF12", "MF11");
-grid on;
-title("Steering Column Torque at 10 deg Steering Angle");
-subtitle({"Depicts: steering column torque required for each front geometry case.", ...
-          "Optimize: balance feedback and effort by tuning trail, scrub radius, caster, KPI, and steering ratio."});
-saveas(gcf, fullfile(outputDir, 'steering_column_torque_comparison.png'));
+    figure("Name", "Steering Column Torque Comparison", "NumberTitle", "off");
+    plot(a_y / 32.2, -T_column);
+    hold on;
+    plot(a_y / 32.2, -T_column1);
+    plot(a_y / 32.2, -T_column2);
+    xlim([0.8, 1.9]);
+    xlabel("Cornering G-force");
+    ylabel("Column Torque (lbf-in)");
+    legend("MF14", "MF12", "MF11");
+    grid on;
+    title("Steering Column Torque at 10 deg Steering Angle");
+    subtitle({"Depicts: steering column torque required for each front geometry case.", ...
+              "Optimize: balance feedback and effort by tuning trail, scrub radius, caster, KPI, and steering ratio."});
+    saveas(gcf, fullfile(outputDir, 'steering_column_torque_comparison.png'));
+end
 
 function result = evaluateVehicleBalance(params, P, L, PM, LMZ, sampleCount)
     sampleIdx = unique(round(linspace(1, numel(params.a_y), min(sampleCount, numel(params.a_y)))));
@@ -834,6 +931,53 @@ function result = evaluateVehicleBalance(params, P, L, PM, LMZ, sampleCount)
     result.g = a_y / 32.2;
     result.frontSA = frontSA;
     result.rearSA = rearSA;
+    result.minInsideWheelLoad = min([wheelLoads{1, 1}; wheelLoads{1, 2}; ...
+                                     wheelLoads{2, 1}; wheelLoads{2, 2}], [], 1);
+end
+
+function metrics = evaluateAeroBalanceCandidates(candidateValues, radii, baseParams, ...
+                                                  P, L, PM, LMZ, sampleCount, slipCapDeg, ...
+                                                  targetSlipGap, saturationPenalty, wheelLiftPenalty)
+    candidateCount = numel(candidateValues);
+    metrics.objective = inf(size(candidateValues));
+    metrics.rmsSlipGapError = inf(size(candidateValues));
+    metrics.saturationFraction = zeros(size(candidateValues));
+    metrics.wheelLiftFraction = zeros(size(candidateValues));
+
+    for candidateIdx = 1:candidateCount
+        squaredErrorSum = 0;
+        validPointCount = 0;
+        saturatedPointCount = 0;
+        wheelLiftPointCount = 0;
+        totalPointCount = 0;
+
+        for radiusIdx = 1:numel(radii)
+            candidateParams = baseParams;
+            candidateParams.DFDistF = candidateValues(candidateIdx);
+            candidateParams.r_corner = radii(radiusIdx);
+            candidateResult = evaluateVehicleBalance(candidateParams, P, L, PM, LMZ, sampleCount);
+
+            slipGap = candidateResult.frontSA - candidateResult.rearSA;
+            saturated = candidateResult.frontSA >= slipCapDeg | candidateResult.rearSA >= slipCapDeg;
+            wheelLift = candidateResult.minInsideWheelLoad <= 0;
+            valid = isfinite(slipGap) & ~saturated & ~wheelLift;
+
+            squaredErrorSum = squaredErrorSum + sum((slipGap(valid) - targetSlipGap).^2);
+            validPointCount = validPointCount + nnz(valid);
+            saturatedPointCount = saturatedPointCount + nnz(saturated);
+            wheelLiftPointCount = wheelLiftPointCount + nnz(wheelLift);
+            totalPointCount = totalPointCount + numel(slipGap);
+        end
+
+        if validPointCount > 0
+            metrics.rmsSlipGapError(candidateIdx) = sqrt(squaredErrorSum / validPointCount);
+        end
+        metrics.saturationFraction(candidateIdx) = saturatedPointCount / totalPointCount;
+        metrics.wheelLiftFraction(candidateIdx) = wheelLiftPointCount / totalPointCount;
+        metrics.objective(candidateIdx) = metrics.rmsSlipGapError(candidateIdx) + ...
+            saturationPenalty * metrics.saturationFraction(candidateIdx) + ...
+            wheelLiftPenalty * metrics.wheelLiftFraction(candidateIdx);
+    end
 end
 
 function value = getOverrideValue(overrides, fieldName, defaultValue)
