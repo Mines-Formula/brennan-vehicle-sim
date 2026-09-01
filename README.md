@@ -47,6 +47,27 @@ These scripts estimate steady-state cornering balance using wheel loads,
 load transfer, aero distribution, camber, toe/Ackermann effects, Pacejka lateral
 tire force, and aligning moment calculations.
 
+#### Python MF13 Rebuild
+
+`VehicleBalance_MF13.py` is a tested numerical port of `VehicleBalance_MF13.m`.
+Set up and run it with uv from the repository root:
+
+```powershell
+uv sync
+uv run vehicle-balance-mf13
+```
+
+It writes seven PNG plots and a compact `summary.json` to
+`VehicleBalance_MF13_outputs/`. Use `--show` for interactive plot windows,
+`--no-plots` for calculation only, `--output-dir <path>` to change the output
+folder, or `--config <file.json>` to override fields from `VehicleConfig`.
+
+Run the MATLAB-parity and invariant tests with:
+
+```powershell
+uv run pytest
+```
+
 `VehicleBalance_MF14.m` is the current active balance tool. It adds the tire
 modeling folder to the MATLAB path:
 
@@ -165,6 +186,7 @@ the matching `.mat` or `.csv` files under `Data Visualiztion/Data Files/` or
 
 ## Requirements
 
+- uv for the Python MF13 rebuild.
 - MATLAB.
 - Simulink for files and workflows under `VDBS/`.
 - Git LFS for large binary data and Simulink assets.

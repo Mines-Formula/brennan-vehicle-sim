@@ -28,6 +28,14 @@ codegen/
 *_rtw/
 VehicleBalance_*_outputs/
 
+# Python and uv generated artifacts
+.venv/
+.uv-cache/
+.matplotlib-cache/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
 # Build and temporary outputs
 *.log
 *.tmp
